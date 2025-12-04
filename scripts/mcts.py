@@ -62,7 +62,7 @@ class MCTSNode:
         uct = float("inf")
       else:
         exploit = child.total_reward / child.visits
-        explore = c * math.sqrt(2.0 * math.log(self.visits) / child.visits)
+        explore = c*math.sqrt(math.log(self.visits)/child.visits)
         uct = exploit + explore
       if uct > best_score:
         best_score = uct
