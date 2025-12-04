@@ -1,7 +1,8 @@
+import random
 import multiprocessing as mp
-from typing import Iterable
+from typing import Iterable, Dict
 from transitions import FlowerTransitions
-from mdp import FlowerMDP, State
+from mdp import FlowerMDP, State, Action
 from mcts import (mcts_search, extract_root_action_stats, best_root_action_from_stats)
 
 def _worker_mcts_run(species: str, targets: Iterable[str], root_state: State, n_simulations: int, max_rollout_depth: int, seed: int | None = None) -> Dict[Action, Dict[str, float]]:
