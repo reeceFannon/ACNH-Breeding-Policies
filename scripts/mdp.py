@@ -20,7 +20,7 @@ class FlowerMDP:
     Terminal if for every target group G in target_groups,
     state ∩ G ≠ ∅ (i.e., we have at least one genotype from each group).
     """
-    for group in self.target_groups:
+    for group in self.targets:
       if state.isdisjoint(group):
         return False
     return True
