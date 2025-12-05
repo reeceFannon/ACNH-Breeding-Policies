@@ -1,7 +1,7 @@
 import math
 import random
 import multiprocessing as mp
-from typing import Iterable, Dict, List, Tupple, Sequence, FrozenSet
+from typing import Iterable, Dict, List, Tuple, Sequence, FrozenSet
 from transitions import FlowerTransitions
 from mdp import FlowerMDP, State, Action
 from mcts import (mcts_search, extract_root_action_stats, best_root_action_from_stats)
