@@ -35,8 +35,9 @@ def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_sta
   elif len(seeds) < n_workers: raise Exception(f"Not enough seeds. Seeds requires length {n_workers}. You have {len(seeds)}")
   else: seeds = seeds[:n_workers]
 
-  with mp.Pool(processes=n_workers) as pool:
-    args = [(species, targets, root_state, sims_per_worker, max_rollout_depth, c, None if i is None else i) for i in seeds]
+  args = [(species, targets, root_state, sims_per_worker, max_rollout_depth, c, None if i is None else i) for i in seeds]
+  ctx = mp.get_context("spawn")
+  with ctx.Pool(processes=n_workers) as pool:
     results = pool.starmap(_worker_mcts_run, args)
 
   # Aggregate stats
