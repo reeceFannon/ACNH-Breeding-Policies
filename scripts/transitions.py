@@ -58,7 +58,6 @@ class FlowerGenetics:
   def __post_init__(self):
     self._df = pl.read_csv(self.paths.genetics_csv)
 
-  @lru_cache(maxsize=None)
   def genotypes_for_phenotypes(self, species: str, phenotypes: tuple[str, ...]) -> List[FrozenSet[str]]:
     """
     Given a species and a tuple of phenotype names,
@@ -72,7 +71,7 @@ class FlowerGenetics:
 
     result: List[FrozenSet[str]] = []
     for ph in norm_phens:
-      subset = self._df.filter((pl.col("species") == species) & (pl.col("phenotype") == ph))
+      subset = self._df.filter((pl.col("flower") == species) & (pl.col("phenotype") == ph))
       genos = frozenset(subset["genotype"].to_list())
       result.append(genos)
 
