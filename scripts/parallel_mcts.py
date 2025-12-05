@@ -32,7 +32,7 @@ def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_sta
     sims_per_worker = 1
 
   if seeds is None: seeds = list(range(n_workers))
-  elif len(seeds) < n_workers: raise Exception(f"Not enough seeds. Seeds requires length {n_workers}. You have {len(seeds}")
+  elif len(seeds) < n_workers: raise Exception(f"Not enough seeds. Seeds requires length {n_workers}. You have {len(seeds)}")
   else: seeds = seeds[:n_workers]
 
   with mp.Pool(processes=n_workers) as pool:
