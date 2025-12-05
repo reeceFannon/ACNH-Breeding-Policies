@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import FrozenSet, Tuple, Dict, Iterable, List
+from typing import FrozenSet, Tuple, Dict, Iterable, List, Sequence
 import random
 from itertools import combinations_with_replacement
 from transitions import FlowerTransitions, canonical_pair
@@ -12,12 +12,18 @@ Action = Tuple[str, str]
 class FlowerMDP:
   species: str
   transitions: FlowerTransitions
-  targets: FrozenSet[str]
+  targets: Sequence[FrozenSet[str]]
   action_cache: Dict[State, List[Action]] = field(default_factory = dict, init = False, repr = False)
 
   def is_terminal(self, state: State) -> bool:
-    """Terminal if any target genotype is present in the unlocked set."""
-    return not self.targets.isdisjoint(state)
+    """
+    Terminal if for every target group G in target_groups,
+    state ∩ G ≠ ∅ (i.e., we have at least one genotype from each group).
+    """
+    for group in self.target_groups:
+      if state.isdisjoint(group):
+        return False
+    return True
 
   def available_actions(self, state: State) -> List[Action]:
     """
@@ -29,6 +35,7 @@ class FlowerMDP:
 
     genotypes = sorted(state)
     actions = list(combinations_with_replacement(genotypes, 2))
+    self.action_cache[state] = actions
     return actions
 
   def next_state_distribution(self, state: State, action: Action) -> Dict[State, float]:
