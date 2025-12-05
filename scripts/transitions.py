@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict
+from typing import Dict, List, FrozenSet
 import polars as pl
 
 def canonical_pair(a: str, b: str) -> tuple[str, str]:
@@ -50,3 +50,30 @@ class FlowerTransitions:
 
     # df_pair: columns ['species','parent1','parent2','offspring','prob']
     return dict(zip(df_pair["offspring"].to_list(), df_pair["prob"].to_list()))
+
+@dataclass
+class FlowerGenetics:
+  paths: FlowerDataPaths
+
+  def __post_init__(self):
+    self._df = pl.read_csv(self.paths.genetics_csv)
+
+  @lru_cache(maxsize=None)
+  def genotypes_for_phenotypes(self, species: str, phenotypes: tuple[str, ...]) -> List[FrozenSet[str]]:
+    """
+    Given a species and a tuple of phenotype names,
+    return a list of frozensets of genotypes:
+        [ G(phenotype_1), G(phenotype_2), ... ]
+    where each G(...) is the set of genotypes for that phenotype.
+    Order matches the order of `phenotypes`.
+    """
+    species = species.lower()
+    norm_phens = tuple(p.strip().lower() for p in phenotypes)
+
+    result: List[FrozenSet[str]] = []
+    for ph in norm_phens:
+      subset = self._df.filter((pl.col("species") == species) & (pl.col("phenotype") == ph))
+      genos = frozenset(subset["genotype"].to_list())
+      result.append(genos)
+
+    return result
