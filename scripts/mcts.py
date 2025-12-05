@@ -53,7 +53,7 @@ class MCTSNode:
 
   def best_child(self, c: float = math.sqrt(2.0)) -> "MCTSNode":
     """
-    UCT selection: argmax over children of (Q / N + c * sqrt(2 log Np / Nc)).
+    UCT selection: argmax over children of (Q / N + c * sqrt(log Np / Nc)).
     """
     best_score = -float("inf")
     best = None
