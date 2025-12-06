@@ -76,3 +76,21 @@ class FlowerGenetics:
       result.append(genos)
 
     return result
+
+  def phenotypes_for_genotypes(self, species: str, genotypes: List[str]) -> List[str]:
+      """
+      Given a species and a list of genotypes,
+      return a list of frozensets of phenotypes:
+          [ Q(phenotype_1), Q(phenotype_2), ... ]
+      where each Q(...) is the phenotype for that genotype.
+      Order matches the order of `genotypes`.
+      """
+      species = species.lower()
+  
+      result: List[FrozenSet[str]] = []
+      for g in genotypes:
+        subset = self._df.filter((pl.col("flower") == species) & (pl.col("genotype") == g))
+        phenos = tuple(subset["phenotype"].to_list())
+        result.append(phenos)
+  
+      return result
