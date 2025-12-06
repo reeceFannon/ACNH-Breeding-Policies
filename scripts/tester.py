@@ -103,9 +103,7 @@ def tester_reveal_probability(species: str, tester: str, group: list[tuple[str, 
 class TestSpec:
   phenotype: str                       # ambiguous phenotype we’re resolving
   tester: str                          # chosen tester genotype from state
-  candidates: Tuple[str, ...]          # ambiguous genotypes
-  reveal_probs: Dict[str, float]       # r_h: hit_prob per genotype
-  p_reveal_overall: float              # overall P(reveal)
+  group: Tuple[Tuple[str, float], ...] # ((geno, P(h|AxB)), ...)
 
 def choose_optimal_tester_for_group(species: str, state: FrozenSet[str], phenotype: str, group: List[Tuple[str, float]], transitions: "FlowerTransitions", genetics: "FlowerGenetics") -> Optional[TestSpec]:
   """
@@ -117,17 +115,18 @@ def choose_optimal_tester_for_group(species: str, state: FrozenSet[str], phenoty
 
   best_tester: Optional[str] = None
   best_p_reveal = 0.0
-  best_hit: Dict[str, float] = {}
 
   for tester in state:
     p_reveal, unique_pheno, hit_prob = tester_reveal_probability(species, tester, group, transitions, genetics)
     if p_reveal > best_p_reveal:
       best_p_reveal = p_reveal
       best_tester = tester
-      best_hit = hit_prob
 
   if best_tester is None or best_p_reveal == 0.0:
     return None
 
-  candidates = tuple(g for g, _ in group)
-  return TestSpec(phenotype = phenotype, tester = best_tester, candidates = candidates, reveal_probs = best_hit, p_reveal_overall = best_p_reveal)
+  # normalize the original group into a conditional prior P(h | ambiguous phenotype)
+  total = sum(p for _, p in group)
+  cond_group = tuple((g, p / total) for g, p in group)
+
+  return TestSpec(phenotype = phenotype, tester = best_tester, group = cond_group)
