@@ -4,7 +4,7 @@ import multiprocessing as mp
 from typing import Iterable, Dict, List, Tuple, Sequence, FrozenSet
 from transitions import FlowerTransitions
 from mdp import FlowerMDP, State, Action
-from mcts import (sample_next_state, mcts_search, extract_root_action_stats, best_root_action_from_stats, StepStats, ActionStepStats)
+from mcts import (sample_next_state, mcts_search, extract_root_action_stats, best_root_action_from_stats, StepStats)
 
 def _worker_mcts_run(species: str, targets: Sequence[FrozenSet[str]], root_state: State, n_simulations: int, max_rollout_depth: int, c: float = math.sqrt(2.0), seed: int | None = None) -> Dict[Action, Dict[str, float]]:
   """
@@ -45,14 +45,15 @@ def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_sta
   for stats in results:
     for action, s in stats.items():
       if action not in aggregated:
-        aggregated[action] = {"visits": 0.0, "total_reward": 0.0}
+        aggregated[action] = {"visits": 0.0, "total_reward": 0.0, "total_sq_reward": 0.0}
       aggregated[action]["visits"] += s["visits"]
       aggregated[action]["total_reward"] += s["total_reward"]
+      aggregated[action]["total_sq_reward"] += s["total_sq_reward"]
 
   best_action = best_root_action_from_stats(aggregated)
   return best_action, aggregated
 
-def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, total_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), action_step_stats: ActionStepStats | None = None, min_depth_floor: int = 10, seeds: List[int] | None = None) -> Dict[str, object]:
+def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, total_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), min_depth_floor: int = 10, seeds: List[int] | None = None) -> Dict[str, object]:
   """
   High-level episode driver that uses *parallel* MCTS at each step.
   Loop:
@@ -68,9 +69,6 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
     - 'success'     : mdp.is_terminal(final_state)
     - 'stats'       : the (possibly updated) action_step_stats
   """
-  if action_step_stats is None:
-    action_step_stats = {}
-
   transitions = FlowerTransitions()
   mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
 
@@ -78,33 +76,17 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
   total_steps = 0
   trajectory: List[Tuple[State, Action]] = []
   current_max_rollout_depth = root_max_rollout_depth
+  step_stats = StepStats()
   while (not mdp.is_terminal(state)) and (total_steps < max_episode_steps):
-    remaining = max_episode_steps - total_steps
-
     # --- dynamic rollout depth from (state, action) step stats ---
-    rollout_depth = current_max_rollout_depth
-    actions = mdp.available_actions(state)
+    #actions = mdp.available_actions(state)
 
-    if actions:
-      candidate_depths: List[float] = []
-      for a in actions:
-        key = (state, a)
-        st = action_step_stats.get(key)
-        if st is not None and st.mean is not None and st.variance is not None:
-          mu = st.mean
-          sigma = math.sqrt(max(st.variance, 0.0))
-          candidate_depths.append(mu + 4*sigma) # from Chebyshev's Inquality
-
-      if candidate_depths:
-        est = max(min(candidate_depths), min_depth_floor)
-        rollout_depth = int(math.ceil(est))
-
-    if rollout_depth <= 0:
+    if current_max_rollout_depth <= 0:
       break
 
     # --- parallel root MCTS from current state ---
     step_seeds = seeds if seeds is not None else [random.randint(1, 2**31 - 1) for i in range(n_workers)]
-    best_action, root_stats = parallel_mcts_root(species = species, targets = targets, root_state = state, total_simulations = total_simulations, max_rollout_depth = rollout_depth, n_workers = n_workers, c = c, seeds = step_seeds)
+    best_action, root_stats = parallel_mcts_root(species = species, targets = targets, root_state = state, total_simulations = total_simulations, max_rollout_depth = current_max_rollout_depth, n_workers = n_workers, c = c, seeds = step_seeds)
 
     if best_action is None:
       break  # no legal actions
@@ -115,18 +97,13 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
     next_state = sample_next_state(mdp, state, best_action)
     state = next_state
     total_steps += 1
-    print(f"Finished step {total_steps}: Chose action {best_action} with rollout depth {rollout_depth}")
+    print(f"Finished step {total_steps}: Chose action {best_action} with rollout depth {current_max_rollout_depth}")
 
-  # --- update (state, action) -> steps-to-finish stats for this episode ---
-  for t, (s_t, a_t) in enumerate(trajectory):
-    steps_from_here = total_steps - t
-    key = (s_t, a_t)
-    stats = action_step_stats.get(key)
-    if stats is None:
-      stats = StepStats()
-      action_step_stats[key] = stats
-    stats.update(steps_from_here)
+    # update best action stats and rollout depth
+    best_stats = root_stats[best_action]
+    step_stats.update(best_stats["visits"], abs(best_stats["total_reward"]), best_stats["total_sq_reward"])
+    current_max_rollout_depth = int(max(min(step_stats.mean + 3*math.sqrt(step_stats.variance), current_max_rollout_depth), min_depth_floor))
 
   success = mdp.is_terminal(state)
 
-  return {"trajectory": trajectory, "final_state": state, "total_steps": total_steps, "success": success, "stats": action_step_stats}
+  return {"trajectory": trajectory, "final_state": state, "total_steps": total_steps, "success": success}
