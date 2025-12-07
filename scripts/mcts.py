@@ -47,6 +47,7 @@ class MCTSNode:
 
   visits: int = 0
   total_reward: float = 0.0
+  total_sq_reward: float = 0.0
 
   def is_fully_expanded(self) -> bool:
     return len(self.untried_actions) == 0
@@ -99,6 +100,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
     while node is not None:
       node.visits += 1
       node.total_reward += reward
+      node.total_sq_reward += reward**2
       node = node.parent
 
   return root
@@ -109,10 +111,10 @@ class StepStats:
   sum_steps: float = 0.0
   sum_sq_steps: float = 0.0
 
-  def update(self, steps: int) -> None:
-    self.n += 1
-    self.sum_steps += steps
-    self.sum_sq_steps += steps**2
+  def update(self, n: int, sum_steps: float, sum_sq_steps: float) -> None:
+    self.n = n
+    self.sum_steps = sum_steps
+    self.sum_sq_steps = sum_sq_steps
 
   @property
   def mean(self) -> Optional[float]:
@@ -127,8 +129,6 @@ class StepStats:
     m = self.mean
     return (self.sum_sq_steps/self.n) - m**2 # E(X^2) - (E(X))^2
 
-ActionStepStats = Dict[Tuple[State, Action], StepStats]
-
 def extract_root_action_stats(root: MCTSNode) -> Dict[Action, Dict[str, float]]:
   """
   Summarize stats for each root action:
@@ -137,7 +137,8 @@ def extract_root_action_stats(root: MCTSNode) -> Dict[Action, Dict[str, float]]:
   stats: Dict[Action, Dict[str, float]] = {}
   for action, child in root.children.items():
     stats[action] = {"visits": child.visits,
-                      "total_reward": child.total_reward}
+                      "total_reward": child.total_reward,
+                      "total_sq_reward": child.total_sq_reward}
   return stats
 
 def best_root_action_from_stats(stats: Dict[Action, Dict[str, float]]) -> Optional[Action]:
