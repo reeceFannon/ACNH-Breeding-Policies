@@ -2,7 +2,7 @@ import math
 import random
 from typing import Dict
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from mdp import FlowerMDP, State, Action
 
 def sample_next_state(mdp: FlowerMDP, state: State, action: Action) -> State:
@@ -102,6 +102,32 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
       node = node.parent
 
   return root
+
+@dataclass
+class StepStats:
+  n: int = 0
+  sum_steps: float = 0.0
+  sum_sq_steps: float = 0.0
+
+  def update(self, steps: int) -> None:
+    self.n += 1
+    self.sum_steps += steps
+    self.sum_sq_steps += steps**2
+
+  @property
+  def mean(self) -> Optional[float]:
+    if self.n == 0:
+      return None
+    return self.sum_steps/self.n
+
+  @property
+  def variance(self) -> Optional[float]:
+    if self.n == 0:
+      return None
+    m = self.mean
+    return (self.sum_sq_steps/self.n) - m**2 # E(X^2) - (E(X))^2
+
+ActionStepStats = Dict[Tuple[State, Action], StepStats]
 
 def extract_root_action_stats(root: MCTSNode) -> Dict[Action, Dict[str, float]]:
   """
