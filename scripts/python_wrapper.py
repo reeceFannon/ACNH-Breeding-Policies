@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Sequence, FrozenSet, List, Dict, Any
 from mdp import State
 from parallel_mcts import parallel_full_episode
-from scripts.dag import build_genotype_dag, build_action_schedule
+from dag import build_genotype_dag, build_action_schedule
 
 def _make_state(genotypes) -> State:
     """
