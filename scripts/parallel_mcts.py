@@ -53,7 +53,7 @@ def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_sta
   best_action = best_root_action_from_stats(aggregated)
   return best_action, aggregated
 
-def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, total_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), min_depth_floor: int = 10, seeds: List[int] | None = None) -> Dict[str, object]:
+def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), min_n_simulations: int = 100, min_depth_floor: int = 10, seeds: List[int] | None = None) -> Dict[str, object]:
   """
   High-level episode driver that uses *parallel* MCTS at each step.
   Loop:
@@ -76,6 +76,7 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
   total_steps = 0
   trajectory: List[Tuple[State, Action]] = []
   current_max_rollout_depth = root_max_rollout_depth
+  current_n_simulations = root_n_simulations
   step_stats = StepStats()
   while (not mdp.is_terminal(state)) and (total_steps < max_episode_steps):
     # --- dynamic rollout depth from (state, action) step stats ---
@@ -86,7 +87,7 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
 
     # --- parallel root MCTS from current state ---
     step_seeds = seeds if seeds is not None else [random.randint(1, 2**31 - 1) for i in range(n_workers)]
-    best_action, root_stats = parallel_mcts_root(species = species, targets = targets, root_state = state, total_simulations = total_simulations, max_rollout_depth = current_max_rollout_depth, n_workers = n_workers, c = c, seeds = step_seeds)
+    best_action, root_stats = parallel_mcts_root(species = species, targets = targets, root_state = state, total_simulations = current_n_simulations, max_rollout_depth = current_max_rollout_depth, n_workers = n_workers, c = c, seeds = step_seeds)
 
     if best_action is None:
       break  # no legal actions
@@ -97,12 +98,22 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
     next_state = sample_next_state(mdp, state, best_action)
     state = next_state
     total_steps += 1
-    print(f"Finished step {total_steps}: Chose action {best_action} with rollout depth {current_max_rollout_depth}")
+    print(f"Finished step {total_steps}: Chose action {best_action} with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
 
     # update best action stats and rollout depth
     best_stats = root_stats[best_action]
     step_stats.update(best_stats["visits"], abs(best_stats["total_reward"]), best_stats["total_sq_reward"])
     current_max_rollout_depth = int(max(min(step_stats.mean + 3*math.sqrt(step_stats.variance), current_max_rollout_depth), min_depth_floor))
+
+    # update the number of simulations
+    list_of_stats = list(root_stats.values())
+    sum_s = 0
+    for stats in list_of_stats:
+      act_stats = StepStats(*tuple(abs(x) for x in stats.values()))
+      sum_s += math.sqrt(max(act_stats.variance, 0.0))
+    avg_s = sum_s/len(list_of_stats)
+    current_n_simulations = int(current_n_simulations*(1 - 1/avg_s)) # update simulations in accordance with uncertainty/precision about actions
+      
 
   success = mdp.is_terminal(state)
 
