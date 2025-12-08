@@ -78,6 +78,7 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
   current_max_rollout_depth = root_max_rollout_depth
   current_n_simulations = root_n_simulations
   step_stats = StepStats()
+  act_stats = StepStats()
   while (not mdp.is_terminal(state)) and (total_steps < max_episode_steps):
     # --- dynamic rollout depth from (state, action) step stats ---
     #actions = mdp.available_actions(state)
@@ -109,10 +110,10 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
     list_of_stats = list(root_stats.values())
     sum_s = 0
     for stats in list_of_stats:
-      act_stats = StepStats(*tuple(abs(x) for x in stats.values()))
+      act_stats.update(stats["visits"], abs(stats["total_reward"]), stats["total_sq_reward"])
       sum_s += math.sqrt(max(act_stats.variance, 0.0))
     avg_s = sum_s/len(list_of_stats)
-    current_n_simulations = int(current_n_simulations*(1 - 1/avg_s)) # update simulations in accordance with uncertainty/precision about actions
+    current_n_simulations = int(max(current_n_simulations*(1 - 1/avg_s), min_n_simulations)) # update simulations in accordance with uncertainty/precision about actions
       
 
   success = mdp.is_terminal(state)
