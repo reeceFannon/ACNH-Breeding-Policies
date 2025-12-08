@@ -53,7 +53,7 @@ def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_sta
   best_action = best_root_action_from_stats(aggregated)
   return best_action, aggregated
 
-def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), min_n_simulations: int = 100, min_depth_floor: int = 10, seeds: List[int] | None = None) -> Dict[str, object]:
+def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seeds: List[int] | None = None) -> Dict[str, object]:
   """
   High-level episode driver that uses *parallel* MCTS at each step.
   Loop:
@@ -78,7 +78,6 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
   current_max_rollout_depth = root_max_rollout_depth
   current_n_simulations = root_n_simulations
   step_stats = StepStats()
-  act_stats = StepStats()
   while (not mdp.is_terminal(state)) and (total_steps < max_episode_steps):
     # --- dynamic rollout depth from (state, action) step stats ---
     #actions = mdp.available_actions(state)
@@ -107,15 +106,13 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
     current_max_rollout_depth = int(max(min(step_stats.mean + 3*math.sqrt(step_stats.variance), current_max_rollout_depth), min_depth_floor))
 
     # update the number of simulations
-    list_of_stats = list(root_stats.values())
-    sum_s = 0
-    for stats in list_of_stats:
-      act_stats.update(stats["visits"], abs(stats["total_reward"]), stats["total_sq_reward"])
-      sum_s += math.sqrt(max(act_stats.variance, 0.0))
-    avg_s = sum_s/len(list_of_stats)
-    current_n_simulations = int(max(current_n_simulations*(1 - 1/avg_s), min_n_simulations)) # update simulations in accordance with uncertainty/precision about actions
+    visits = [stats["visits"] for stats in root_stats.values()]
+    p_visit = [v/sum(visits) for v in visits]
+    entropy = -sum(p_v*math.log(p_v) for p_v in p_visit)
+    entropy_ratio = entropy/math.log(len(visits)) # the upper bound on entropy is ln(len(X)), where every x in X is identically equal (no uncertainty)
+    scale_factor = max(entropy_ratio, max_simulations_scale_factor)
+    current_n_simulations = int(max(scale_factor*current_n_simulations, min_n_simulations)) # update simulations in accordance with uncertainty/precision about actions
       
-
   success = mdp.is_terminal(state)
 
   return {"trajectory": trajectory, "final_state": state, "total_steps": total_steps, "success": success}
