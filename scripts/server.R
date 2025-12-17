@@ -196,7 +196,7 @@ server <- function(input, output, session) {
     steps <- res$steps
     if (length(steps) == 0) return(NULL)
 
-    df <- bind_rows(lapply(steps, as.data.frame))
+    df <- bind_rows(steps)
 
     df %>%
       mutate(
@@ -221,7 +221,7 @@ server <- function(input, output, session) {
     waves <- res$waves
     if (length(waves) == 0) return(NULL)
 
-    df <- bind_rows(lapply(waves, as.data.frame))
+    df <- bind_rows(waves)
 
     df %>%
       mutate(
@@ -248,3 +248,4 @@ server <- function(input, output, session) {
     str(res$summary)
   })
 }
+
