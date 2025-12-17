@@ -108,7 +108,7 @@ server <- function(input, output, session) {
       filter(flower == species) %>%
       select(genotype, phenotype)
 
-    punnetSquare(
+    punnettSquare(
       parent1 = parents$genotype[1],
       parent2 = parents$genotype[2],
       df      = df_species
@@ -119,7 +119,7 @@ server <- function(input, output, session) {
   output$punnett_plot <- renderPlot({
     genes <- punnett_data()
     req(genes)
-    plotPunnetSquare(genes)
+    plotPunnettSquare(genes)
   })
 
   # Genotype distribution
@@ -181,11 +181,11 @@ server <- function(input, output, session) {
       root_n_simulations           = input$ep_root_n_sim,
       max_episode_steps            = input$ep_max_steps,
       root_max_rollout_depth       = input$ep_root_depth,
-      n_workers                    = input$ep_n_workers,
       c                            = input$ep_c_ucb,
       min_n_simulations            = input$ep_min_n_sim,
       max_simulations_scale_factor = input$ep_max_sim_scale,
-      min_depth_floor              = input$ep_min_depth_floor
+      min_depth_floor              = input$ep_min_depth_floor,
+      seed                         = input$seed
     )
   })
 

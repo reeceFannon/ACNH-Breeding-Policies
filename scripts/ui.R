@@ -4,6 +4,8 @@ library(shinythemes)
 library(shinydashboard)
 library(tidyverse)
 
+flowers = read_csv("data/ACNH_flower_genetics.csv")
+
 # Dropdown choices for species (uses global `flowers` prepared elsewhere)
 species_choices <- c("All species" = "all",
                      sort(unique(flowers$flower)))
@@ -55,32 +57,34 @@ ui <- fluidPage(
       title = "Episode Planner",
       sidebarLayout(
         sidebarPanel(
-          textInput("ep_species", "Species", value = "rose"),
-
+          selectInput(
+            inputId  = "ep_species",
+            label    = "Species",
+            choices  = species_choices,
+            selected = "rose"
+          ),
           tags$label("Target genotype groups (one group per line, comma-separated)"),
           tags$small("Example: 'RRYY, RrYY' on first line; 'rryy' on second line."),
           textAreaInput(
             "ep_targets_raw",
             NULL,
             value = "",
-            rows = 3,
-            placeholder = "RRYY, RrYY\nrryy"
+            rows = 3
           ),
 
           textInput(
             "ep_root_state_raw",
-            "Initial genotypes (comma-separated)",
-            value = "seed_red, seed_yellow"
+            "Initial genotypes (comma-separated)"
           ),
 
           numericInput("ep_root_n_sim",      "Root n_simulations",            value = 1000, min = 10),
           numericInput("ep_max_steps",       "Max episode steps",             value = 50,   min = 1),
           numericInput("ep_root_depth",      "Root max rollout depth",        value = 20,   min = 1),
-          numericInput("ep_n_workers",       "Number of workers",             value = 4,    min = 1),
           numericInput("ep_c_ucb",           "Exploration constant c",        value = sqrt(2), step = 0.1),
           numericInput("ep_min_n_sim",       "Min n_simulations per step",    value = 100,  min = 1),
           numericInput("ep_max_sim_scale",   "Max simulations scale factor",  value = 0,    step = 0.1),
           numericInput("ep_min_depth_floor", "Min depth floor",               value = 10,   min = 1),
+          numericInput("seed",               "Seed",                          value = 12345,   min = 1),
 
           actionButton("ep_run", "Run planner")
         ),

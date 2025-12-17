@@ -1,8 +1,9 @@
 import math
 import random
-from typing import Dict
+from typing import Optional, Dict, List
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
+from transitions import FlowerTransitions
 from mdp import FlowerMDP, State, Action
 
 def sample_next_state(mdp: FlowerMDP, state: State, action: Action) -> State:
@@ -31,10 +32,6 @@ def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20) -> f
 
   # didn't reach terminal within horizon
   return float(-max_depth)
-
-from dataclasses import dataclass, field
-from typing import Optional, Dict, List
-import math
 
 @dataclass
 class MCTSNode:
@@ -104,6 +101,57 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
       node = node.parent
 
   return root
+
+def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None) -> Dict[str, object]:
+  transitions = FlowerTransitions()
+  mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
+
+  state = root_state
+  total_steps = 0
+  trajectory: List[Tuple[State, Action]] = []
+  current_max_rollout_depth = root_max_rollout_depth
+  current_n_simulations = root_n_simulations
+  step_stats = StepStats()
+  success = False
+  while (not success) and (total_steps < max_episode_steps):
+    if current_max_rollout_depth <= 0:
+      break
+
+    # --- parallel root MCTS from current state ---
+    step_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
+    random.seed(step_seed)
+    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c)
+    root_stats = extract_root_action_stats(root)
+    best_action = best_root_action_from_stats(root_stats)
+
+    if best_action is None:
+      break  # no legal actions
+
+    trajectory.append((state, best_action))
+
+    # sample next state in the *main* process
+    next_state = sample_next_state(mdp, state, best_action)
+    state = next_state
+    total_steps += 1
+    print(f"Finished step {total_steps}: Chose action {best_action} with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
+
+    # update best action stats and rollout depth
+    best_stats = root_stats[best_action]
+    step_stats.update(best_stats["visits"], abs(best_stats["total_reward"]), best_stats["total_sq_reward"])
+    current_max_rollout_depth = int(max(min(step_stats.mean + 3*math.sqrt(step_stats.variance), current_max_rollout_depth), min_depth_floor))
+
+    # update the number of simulations
+    visits = [stats["visits"] for stats in root_stats.values()]
+    p_visit = [v/sum(visits) for v in visits]
+    entropy = -sum(p_v*math.log(p_v) for p_v in p_visit)
+    entropy_ratio = entropy/math.log(len(visits)) # the upper bound on entropy is ln(len(X)), where every x in X is identically equal (no uncertainty)
+    scale_factor = max(entropy_ratio, max_simulations_scale_factor)
+    current_n_simulations = int(max(scale_factor*current_n_simulations, min_n_simulations)) # update simulations in accordance with uncertainty/precision about actions
+      
+    success = mdp.is_terminal(state)
+
+  return {"trajectory": trajectory, "final_state": state, "total_steps": total_steps, "success": success}
+
 
 @dataclass
 class StepStats:
