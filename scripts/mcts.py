@@ -103,15 +103,13 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
   return root
 
 def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None) -> Dict[str, object]:
-  transitions = FlowerTransitions()
-  mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
-
   state = root_state
   total_steps = 0
   trajectory: List[Tuple[State, Action]] = []
   current_max_rollout_depth = root_max_rollout_depth
   current_n_simulations = root_n_simulations
   step_stats = StepStats()
+  transitions = FlowerTransitions()
   success = False
   while (not success) and (total_steps < max_episode_steps):
     if current_max_rollout_depth <= 0:
@@ -120,6 +118,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
     # --- parallel root MCTS from current state ---
     step_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
     random.seed(step_seed)
+    mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
     root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c)
     root_stats = extract_root_action_stats(root)
     best_action = best_root_action_from_stats(root_stats)
