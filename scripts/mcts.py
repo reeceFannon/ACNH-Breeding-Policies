@@ -111,13 +111,13 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
   step_stats = StepStats()
   transitions = FlowerTransitions()
   success = False
+  episode_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
+  random.seed(episode_seed)
   while (not success) and (total_steps < max_episode_steps):
     if current_max_rollout_depth <= 0:
       break
 
     # --- parallel root MCTS from current state ---
-    step_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
-    random.seed(step_seed)
     mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
     root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c)
     root_stats = extract_root_action_stats(root)
