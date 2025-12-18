@@ -78,6 +78,7 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
   current_max_rollout_depth = root_max_rollout_depth
   current_n_simulations = root_n_simulations
   step_stats = StepStats()
+  step_seeds = seeds if seeds is not None else [random.randint(1, 2**31 - 1) for i in range(n_workers)]
   while (not mdp.is_terminal(state)) and (total_steps < max_episode_steps):
     # --- dynamic rollout depth from (state, action) step stats ---
     #actions = mdp.available_actions(state)
@@ -86,7 +87,6 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
       break
 
     # --- parallel root MCTS from current state ---
-    step_seeds = seeds if seeds is not None else [random.randint(1, 2**31 - 1) for i in range(n_workers)]
     best_action, root_stats = parallel_mcts_root(species = species, targets = targets, root_state = state, total_simulations = current_n_simulations, max_rollout_depth = current_max_rollout_depth, n_workers = n_workers, c = c, seeds = step_seeds)
 
     if best_action is None:
