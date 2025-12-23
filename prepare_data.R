@@ -16,6 +16,7 @@ if(!file.exists(outPath))
   flowers = flowers %>%
     mutate(flower = str_remove_all(str_to_lower(flower), "s$"),
            flower = if_else(str_equal(flower, "lilie"), "lily", flower),
+           flower = if_else(str_equal(flower, "pansie"), "pansy", flower),
            phenotype = str_to_lower(str_trim(str_remove_all(phenotype, "\\(seed\\)")))) %>%
     relocate(3, .before = 1)
   

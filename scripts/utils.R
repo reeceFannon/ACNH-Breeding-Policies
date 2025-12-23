@@ -70,14 +70,14 @@ getPunnettDistribution = function(df, isGeno = FALSE)
   {
     df %>%
       count(offspring, name = "count") %>%
-      mutate(prop = count / sum(count)) %>%
-      arrange(desc(prop))
+      mutate(prop = paste0(100*round(count/sum(count), 3), "%")) %>%
+      arrange(desc(count))
   }
   else
   {
     df %>%
       count(phenotype, name = "count") %>%
-      mutate(prop = count / sum(count)) %>%
-      arrange(desc(prop))
+      mutate(prop = paste0(100*round(count/sum(count), 3), "%")) %>%
+      arrange(desc(count))
   }
 }

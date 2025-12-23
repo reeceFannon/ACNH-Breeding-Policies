@@ -45,33 +45,19 @@ def run_episode_for_shiny(species: str, targets, root_state, root_n_simulations:
   schedule = build_action_schedule(trajectory, geno_dag)
 
   # Convert trajectory into a step log that R can table-ize
-  steps: List[Dict[str, Any]] = []
-  states = [s for (s, a) in trajectory]
-  actions = [a for (s, a) in trajectory]
+  actions = [action for (state, action) in trajectory]
   T = len(actions)
-  for t in range(T):
-    s_t = states[t]
-    s_next = states[t + 1] if t < T - 1 else final_state
-    new_genos = sorted(list(s_next.difference(s_t)))
-    a_t = actions[t]
-    wave = schedule.level_of_action.get(t, 0)
-
-    steps.append({"step": int(t),
-                  "wave": int(wave),
-                  "parent1": a_t[0],
-                  "parent2": a_t[1],
-                  "available_before": sorted(list(s_t)),
-                  "new_genotypes": new_genos,
-                 })
-
-  # Summarize waves
-  waves: List[Dict[str, Any]] = []
+  waves_out: List[Dict[str, Any]] = []
   for wave_idx, step_ids in sorted(schedule.actions_by_level.items()):
-    waves.append({"wave": int(wave_idx),
-                  "steps": [int(s) for s in step_ids],
-                 })
+    wave_actions: List[Dict[str, Any]] = []
+    for idx in step_ids:
+      a_t = actions[idx]
+      wave_actions.append({"parent1": str(a_t[0]),
+                           "parent2": str(a_t[1])})
 
-  # You can add more numeric stats here if desired:
+    waves_out.append({"wave": int(wave_idx),
+                      "actions": wave_actions})
+
   summary = {k: v for k, v in episode.items() if isinstance(v, (int, float, str, bool))}
 
-  return {"steps": steps, "final_state": sorted(list(final_state)), "waves": waves, "summary": summary}
+  return {"waves": waves_out, "final_state": sorted(list(final_state)), "summary": summary}

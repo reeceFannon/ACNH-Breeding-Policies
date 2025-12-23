@@ -1,107 +1,192 @@
-# scripts/ui.R
 library(shiny)
-library(shinythemes)
+library(shinyWidgets)
 library(shinydashboard)
 library(tidyverse)
 
-flowers = read_csv("data/ACNH_flower_genetics.csv")
+flowers = read_csv("data/ACNH_flower_genetics.csv") %>% relocate(phenotype, .before = genotype)
+transitions = read_csv("data/breeding_transitions.csv")
+species_choices = sort(unique(flowers$flower))
 
-# Dropdown choices for species (uses global `flowers` prepared elsewhere)
-species_choices <- c("All species" = "all",
-                     sort(unique(flowers$flower)))
+header = dashboardHeader(title = "ACNH Flower Breeding Policy Applet")
 
-ui <- fluidPage(
-  themeSelector(),
-  titlePanel("ACNH Flower Breeding"),
+sidebar = dashboardSidebar(sidebarMenu(id = "main",
+                                       menuItem("Breeding", tabName = "breedTab", icon = icon("th-large", lib = "glyphicon")),
+                                       menuItem("Generate Policy", tabName = "planTab", icon = icon("random", lib = "glyphicon")),
+                                       menuItem("View Policy", tabName = "viewTab", icon = icon("eye-open", lib = "glyphicon"))))
 
-  tabsetPanel(
-    id = "main_tabs",
+body = dashboardBody(tags$head(tags$style(HTML(".picker-row{display: flex; align-items: flex-start; gap: 10px; width: 100%;}
+                                                .picker-img{width: 30px; height: 30px; border-radius: 4px; flex: 0 0 auto;}
+                                                .picker-text{white-space: normal; overflow: visible; font-size: 13px;}
+                                                .bootstrap-select > .dropdown-toggle{overflow-x: auto; white-space: nowrap;}
+                                                .policy-viewer-wrap{overflow-x: auto; overflow-y: visible; padding-bottom: 8px;}
+                                                .policy-grid{display: flex; gap: 18px; align-items: flex-start;}
+                                                .wave-col{min-width: 520px; max-width: 620px; background: #f7f7f7; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px;}
+                                                .wave-title{font-weight: 800; margin-bottom: 10px; font-size: 16px;}
+                                                .action-card{background: white; border: 1px solid #e6e6e6; border-radius: 12px; padding: 12px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.06);}
+                                                .action-grid{display: grid; grid-template-columns: 230px 1fr; column-gap: 14px; align-items: start;}
+                                                .parents-stack{display: flex; flex-direction: column; gap: 8px;}
+                                                .parent-row .picker-row{display: flex; align-items: flex-start; gap: 10px;}
+                                                .parent-sep{text-align: center; font-size: 18px; font-weight: 900; line-height: 1; opacity: 0.55; margin: 2px 0;}
+                                                .offspring-stack{display: flex; flex-direction: column; gap: 10px;}
+                                                .offspring-row{display: grid; grid-template-columns: 78px 1fr 34px; align-items: start; gap: 10px;}
+                                                .offspring-prob{font-family: monospace; text-align: right; opacity: 0.85; font-size: 13px; padding-top: 4px;}
+                                                .offspring-mid .picker-row{display: flex; align-items: center; gap: 8px;}
+                                                .keep-icon, .discard-icon{text-align: center; font-size: 16px; padding-top: 4px;}
+                                                .keep-icon i{color: #2e7d32;}
+                                                .discard-icon i{color: #b71c1c;}"))),
+                     tabItems(tabItem(tabName = "breedTab",
+                                      fluidRow(column(width = 4,
+                                                      box(width = 12,
+                                                          title = "Breeding Inputs",
+                                                          status = "warning",
+                                                          solidHeader = TRUE,
+                                                          selectInput(inputId = "species",
+                                                                      label = "Species",
+                                                                      choices = species_choices,
+                                                                      selected = "rose"),
+                                                          pickerInput(inputId = "parent1",
+                                                                         label = "Select First Parent",
+                                                                         choices = NULL,
+                                                                         multiple = FALSE,
+                                                                         options = pickerOptions(liveSearch = TRUE,
+                                                                                                 actionsBox = TRUE)),
+                                                          pickerInput(inputId = "parent2",
+                                                                      label = "Select Second Parent",
+                                                                      choices = NULL,
+                                                                      multiple = FALSE,
+                                                                      options = pickerOptions(liveSearch = TRUE,
+                                                                                              actionsBox = TRUE))),
+                                                      box(width = 12,
+                                                          title = "Genotype Distribution",
+                                                          status = "success",
+                                                          solidHeader = TRUE,
+                                                          tableOutput("genoTable")),
+                                                      box(width = 12,
+                                                          title = "Phenotype Distribution",
+                                                          status = "success",
+                                                          solidHeader = TRUE,
+                                                          tableOutput("phenoTable"))),
+                                               column(width = 8,
+                                                      box(width = 12,
+                                                          title = "Punnett Square",
+                                                          status = "primary",
+                                                          solidHeader = TRUE,
+                                                          plotOutput("punnettPlot"))))),
+                              tabItem(tabName = "planTab",
+                                      fluidRow(column(width = 4,
+                                                      box(width = 12,
+                                                          status = "warning",
+                                                          actionBttn(inputId = "runPlanner",
+                                                                     label = "Run Planner",
+                                                                     style = "material-flat",
+                                                                     color = "royal",
+                                                                     size = "md",
+                                                                     block = TRUE,
+                                                                     icon = icon("play", lib = "glyphicon"))),
+                                                      box(width = 12,
+                                                          title = "Starters and Targets",
+                                                          status = "warning",
+                                                          solidHeader = TRUE,
+                                                          selectInput(inputId = "planSpecies",
+                                                                      label = "Species",
+                                                                      choices = species_choices,
+                                                                      selected = "rose"),
+                                                          pickerInput(inputId = "rootState",
+                                                                      label = "Select Starting Genotypes",
+                                                                      choices = NULL,
+                                                                      multiple = TRUE,
+                                                                      options = pickerOptions(liveSearch = TRUE,
+                                                                                              actionsBox = TRUE,
+                                                                                              multipleSeparator = "")),
+                                                          uiOutput("targetGroups"),
+                                                          actionBttn(inputId = "addTargets",
+                                                                     label = "Add Group",
+                                                                     style = "material-flat",
+                                                                     color = "royal",
+                                                                     size = "md",
+                                                                     block = TRUE,
+                                                                     icon = icon("plus", lib = "glyphicon"))
+                                                          ),
+                                                      box(width = 12,
+                                                          title = "Hyperparameters",
+                                                          status = "warning",
+                                                          solidHeader = TRUE,
+                                                          numericInputIcon(inputId = "episodeSteps",
+                                                                           label = "Stop Search After This Many Steps",
+                                                                           min = 1,
+                                                                           step = 1,
+                                                                           value = 100,
+                                                                           icon = icon("signal", lib = "glyphicon")),
+                                                          numericInputIcon(inputId = "rootSimulations",
+                                                                           label = "Starting Number of Rollouts",
+                                                                           min = 1,
+                                                                           step = 1,
+                                                                           value = 100,
+                                                                           icon = icon("zoom-out", lib = "glyphicon")),
+                                                          numericInputIcon(inputId = "minSimulations",
+                                                                           label = "Minimum Number of Rollouts",
+                                                                           min = 1,
+                                                                           step = 1,
+                                                                           value = 30,
+                                                                           icon = icon("zoom-in", lib = "glyphicon")),
+                                                          numericInputIcon(inputId = "simScaleFactor",
+                                                                           label = "Max Simulation Downscale Rate",
+                                                                           min = 0,
+                                                                           max = 1,
+                                                                           step = .01,
+                                                                           value = .9,
+                                                                           icon = icon("scale", lib = "glyphicon")),
+                                                          numericInputIcon(inputId = "rootDepth",
+                                                                           label = "Starting Rollout Search Depth",
+                                                                           min = 1,
+                                                                           step = 1,
+                                                                           value = 20,
+                                                                           icon = icon("eye-open", lib = "glyphicon")),
+                                                          numericInputIcon(inputId = "minDepth",
+                                                                           label = "Minimum Rollout Depth",
+                                                                           min = 1,
+                                                                           step = 1,
+                                                                           value = 5,
+                                                                           icon = icon("eye-close", lib = "glyphicon")),
+                                                          numericInputIcon(inputId = "exploreFactor",
+                                                                           label = "Exploration/Exploitation Factor",
+                                                                           min = 0,
+                                                                           value = sqrt(2),
+                                                                           icon = icon("search", lib = "glyphicon")),
+                                                          numericInputIcon(inputId = "seed",
+                                                                           label = "Episode Seed",
+                                                                           min = 1,
+                                                                           max = 2^31 - 1,
+                                                                           step = 1,
+                                                                           value = 12345,
+                                                                           icon = icon("lock", lib = "glyphicon"))
+                                                          )),
+                                               column(width = 8,
+                                                      box(width = 12,
+                                                          title = "Breeding Policy Plan",
+                                                          status = "primary",
+                                                          solidHeader = TRUE,
+                                                          uiOutput("planWarning"),
+                                                          uiOutput("planOutcome"),
+                                                          verbatimTextOutput("planFinalState"),
+                                                          downloadBttn("downloadBttn",
+                                                                       label = "Download Policy",
+                                                                       style = "material-flat",
+                                                                       color = "royal",
+                                                                       size = "md",
+                                                                       block = TRUE,
+                                                                       icon = icon("download", lib = "glyphicon")))))),
+                              tabItem(tabName = "viewTab",
+                                      fluidRow(box(width = 4,
+                                                   title = "Upload Policy",
+                                                   status = "success",
+                                                   solidHeader = TRUE,
+                                                   fileInput("policyFile", "Upload Policy (.rds)", accept = c(".rds")),
+                                                   uiOutput("loadStatus")),
+                                               box(width = 8,
+                                                   status = "primary",
+                                                   solidHeader = TRUE,
+                                                   div(class = "policy-viewer-wrap",
+                                                       uiOutput("policyView")))))))
 
-    ## ---- Tab 1: existing Punnett square calculator ----
-    tabPanel(
-      title = "Punnett Squares",
-      sidebarLayout(
-        sidebarPanel(
-          selectInput(
-            inputId  = "species",
-            label    = "Species",
-            choices  = species_choices,
-            selected = "all"
-          ),
-          selectizeInput(
-            inputId  = "parents",
-            label    = "Select parent flowers",
-            choices  = NULL,          # populated on server side
-            multiple = TRUE,
-            options  = list(
-              placeholder = "Choose up to two flowers...",
-              maxItems    = 4          # server side will warn/use first two
-            )
-          )
-        ),
-        mainPanel(
-          uiOutput("warning"),
-          plotOutput("punnett_plot", height = "650px"),
-          tags$hr(),
-          h4("Offspring Genotypes"),
-          tableOutput("geno_table"),
-          tags$hr(),
-          h4("Offspring Phenotypes"),
-          tableOutput("pheno_table")
-        )
-      )
-    ),
-
-    ## ---- Tab 2: Episode planner (Python + DAG) ----
-    tabPanel(
-      title = "Episode Planner",
-      sidebarLayout(
-        sidebarPanel(
-          selectInput(
-            inputId  = "ep_species",
-            label    = "Species",
-            choices  = species_choices,
-            selected = "rose"
-          ),
-          tags$label("Target genotype groups (one group per line, comma-separated)"),
-          tags$small("Example: 'RRYY, RrYY' on first line; 'rryy' on second line."),
-          textAreaInput(
-            "ep_targets_raw",
-            NULL,
-            value = "",
-            rows = 3
-          ),
-
-          textInput(
-            "ep_root_state_raw",
-            "Initial genotypes (comma-separated)"
-          ),
-
-          numericInput("ep_root_n_sim",      "Root n_simulations",            value = 1000, min = 10),
-          numericInput("ep_max_steps",       "Max episode steps",             value = 50,   min = 1),
-          numericInput("ep_root_depth",      "Root max rollout depth",        value = 20,   min = 1),
-          numericInput("ep_c_ucb",           "Exploration constant c",        value = sqrt(2), step = 0.1),
-          numericInput("ep_min_n_sim",       "Min n_simulations per step",    value = 100,  min = 1),
-          numericInput("ep_max_sim_scale",   "Max simulations scale factor",  value = 0,    step = 0.1),
-          numericInput("ep_min_depth_floor", "Min depth floor",               value = 10,   min = 1),
-          numericInput("seed",               "Seed",                          value = 12345,   min = 1),
-
-          actionButton("ep_run", "Run planner")
-        ),
-        mainPanel(
-          h4("Step-by-step decisions"),
-          tableOutput("ep_steps_table"),
-          tags$hr(),
-          h4("Parallel waves (simultaneous batches)"),
-          tableOutput("ep_waves_table"),
-          tags$hr(),
-          h4("Final genotypes"),
-          verbatimTextOutput("ep_final_state_text"),
-          tags$hr(),
-          h4("Episode summary"),
-          verbatimTextOutput("ep_summary_text")
-        )
-      )
-    )
-  )
-)
+ui = dashboardPage(header = header, sidebar = sidebar, body = body, skin = "red")
