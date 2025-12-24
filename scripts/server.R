@@ -1,9 +1,9 @@
 library(shiny)
 library(tidyverse)
 library(reticulate)
-
-addResourcePath("imgs", "imgs") # import image path
-source_python("scripts/python_wrapper.py") # Import the Python bridge
+source("scripts/utils.R")
+source_python("scripts/python_wrapper.py")
+addResourcePath("imgs", "imgs")
 
 server = function(input, output, session)
 {
@@ -12,41 +12,6 @@ server = function(input, output, session)
   #################################################################################################################
   
   ####################################### Input Widgets ###########################################################
-  
-  seed_map = list(rose = c("rryyWwss" = "white", "rrYYWWss" = "yellow", "RRyyWWSs" = "red"),
-                  cosmo = c("rryySs" = "white", "rrYYSs" = "yellow", "RRyyss" = "red"),
-                  lily = c("rryySS" = "white", "rrYYss" = "yellow", "RRyySs" = "red"),
-                  pansy = c("rryyWw" = "white", "rrYYWW" = "yellow", "RRyyWW" = "red"),
-                  hyacinth = c("rryyWw" = "white", "rrYYWW" = "yellow", "RRyyWw" = "red"),
-                  tulip = c("rryySs" = "white", "rrYYss" = "yellow", "RRyySs" = "red"),
-                  mum = c("rryyWw" = "white", "rrYYWW" = "yellow", "RRyyWW" = "red"),
-                  windflower = c("rrooWw" = "white", "rrOOWW" = "orange", "RRooWW" = "red"))
-  
-  img_filename = function(species, phenotype, genotype)
-  {
-    if (genotype %in% names(seed_map[[species]]))
-    {
-      seed_color = unname(seed_map[[species]][genotype])
-      return(paste0("seed_", seed_color, ".png"))
-    }
-    paste0(species, "_", phenotype, ".png")
-  }
-  
-  build_filtered_df = function(species)
-  {
-    html = "<span class='picker-row'>
-    <img src='/imgs/%s' class='picker-img'>
-    <span class='picker-text'>%s</span>
-    </span>"
-    
-    flowers %>%
-      filter(flower == species) %>%
-      distinct(flower, phenotype, genotype) %>%
-      mutate(label = paste(flower, phenotype, genotype, sep = " | "),
-             img_file = mapply(img_filename, flower, phenotype, genotype),
-             img_html = sprintf(html, img_file, label)) %>%
-      arrange(phenotype, genotype)
-  }
   
   observe({
     species_choices = sort(unique(flowers$flower))
@@ -105,6 +70,120 @@ server = function(input, output, session)
     getPunnettDistribution(df, isGeno = FALSE)
   }, striped = TRUE, bordered = TRUE, spacing = "s")
   
+  #################################### Edit Policy Object #########################################################
+  
+  eventLog = reactiveVal(NULL)
+  numActions = reactiveVal(0)
+  numWaves = reactiveVal(0)
+  policyObject = reactiveValues(waves = list())
+  Wave = reactiveVal(list(wave = 1, actions = list()))
+  
+  Action = reactive(
+  {
+    req(input$species, input$parent1, input$parent2)
+    lookup = build_filtered_df(input$species) %>% select(-flower)
+    action = if(correct_order(input$species, input$parent1, input$parent2, lookup)) construct_action(input$species, input$parent1, input$parent2, lookup) else construct_action(input$species, input$parent2, input$parent1, lookup) 
+    action
+  })
+  
+  output$checkbox = renderUI(
+  {
+    action = Action()
+    req(action)
+    
+    trans_df = action$transitions[[1]]
+    values = trans_df$offspring
+    names  = trans_df$offspring_img_html
+    
+    checkboxGroupButtons(inputId = "keepDiscard",
+                         label = "Select Offspring to Keep",
+                         direction = "vertical",
+                         individual = TRUE,
+                         justified = TRUE,
+                         size = "xs",
+                         choiceValues = values,
+                         choiceNames = names,
+                         checkIcon = list(yes = icon("check", lib = "glyphicon"),
+                                          no = icon("trash", lib = "glyphicon")))
+  })
+  
+  observeEvent(input$addAction, {
+    action = Action()
+    wave = Wave()
+    req(action, wave)
+    
+    picked = input$keepDiscard %||% character(0)
+    action = action %>% mutate(transitions = map(transitions, function(tr) {tr %>% mutate(keep = offspring %in% picked)}))
+    
+    a = numActions() + 1
+    wave$actions[[a]] = action
+    numActions(a)
+    Wave(wave)
+    
+    eventLog(paste0("Action ", "(", action$parent1[1], " x ", action$parent2[1], ") ",  "added to Wave ", numWaves() + 1))
+  })
+  
+  observeEvent(input$addWave, {
+    wave = Wave()
+    req(wave)
+    
+    w = numWaves() + 1
+    wave$wave = w
+    
+    policyObject$waves[[w]] = wave
+    
+    numWaves(w)
+    numActions(0)
+    Wave(list(wave = w + 1, actions = list()))
+    
+    eventLog(paste0("Wave ", w, " added with ", length(wave$actions), " actions"))
+  })
+  
+  manual_policy = reactive(
+  {
+    waves = policyObject$waves
+    cur = Wave()
+    if (!is.null(cur) && length(cur$actions) > 0)
+    {
+      cur$wave = numWaves() + 1
+      waves = c(waves, list(cur))
+    }
+    list(waves = waves)
+  })
+  
+  output$downloadBttn2 = renderUI(
+    {
+      pol = manual_policy()
+      req(pol)
+      
+      if(is.null(pol)) return(NULL)
+      box(width = 12,
+          status = "info",
+          solidHeader = TRUE,
+          actionBttn(inputId = "download2",
+                     label = "Download Policy",
+                     style = "material-flat",
+                     color = "royal",
+                     size = "md",
+                     block = TRUE,
+                     icon = icon("save", lib = "glyphicon")))
+    })
+  
+  output$downloadBttn2 = downloadHandler(
+    filename = function() {paste0("acnh_policy_", input$planSpecies, "_", ".rds")},
+    content = function(file) 
+    {
+      pol = manual_policy()
+      req(pol)
+      
+      saveRDS(pol, file)
+    })
+  
+  output$eventLogText = renderText(
+  {
+    eventLog()
+  })
+  
   #################################################################################################################
   ####################################### Planning Tab ############################################################
   #################################################################################################################
@@ -161,23 +240,23 @@ server = function(input, output, session)
   
   ######################################### Running Planner ##################################################
   
-  get_targets = function()
+  plan_warning = reactiveVal(NULL)
+  plan_result  = reactiveVal(NULL)
+  plan_running = reactiveVal(FALSE)
+  
+  get_targets = function(rv)
   {
     if (rv$n_groups <= 0) return(list())
     targets = lapply(seq_len(rv$n_groups), function(k) {input[[paste0("targetGroup_", k)]]})
     Filter(function(x) !is.null(x) && length(x) > 0, targets)
   }
   
-  plan_warning = reactiveVal(NULL)
-  plan_result  = reactiveVal(NULL)
-  plan_running = reactiveVal(FALSE)
-  
   observeEvent(input$runPlanner, {
     plan_warning(NULL)
     plan_result(NULL)
     
     # ---- validate ----
-    targets = get_targets()
+    targets = get_targets(rv)
     if(length(targets) == 0) {plan_warning("Please add at least one target group and select at least one genotype in it.")}
     if(is.null(input$planSpecies) || input$planSpecies == "") {plan_warning("Please select a species.")}
     if(is.null(input$rootState) || length(input$rootState) == 0) {plan_warning("Please select at least one starting genotype.")}
@@ -279,92 +358,6 @@ server = function(input, output, session)
                      icon = icon("save", lib = "glyphicon")))
   })
   
-  get_transition_df = function(sp, p1, p2)
-  {
-    transitions %>% 
-      filter(species == sp, (parent1 == p1 & parent2 == p2) | (parent1 == p2 & parent2 == p1))
-  }
-  
-  build_policy_plan = function(species, ls)
-  {
-    lookup = build_filtered_df(species) %>% select(-flower)
-    
-    waves_out = lapply(ls$waves, function(w)
-    {
-      wave_idx = w$wave
-      actions_df = tibble(parent1 = vapply(w$actions, function(a) a$parent1, character(1)),
-                          parent2 = vapply(w$actions, function(a) a$parent2, character(1))) %>%
-        mutate(pair_key = vapply(seq_len(dplyr::n()), function(i) paste(sort(c(parent1[i], parent2[i])), collapse = "|"), character(1))) %>%
-        distinct(pair_key, .keep_all = TRUE) %>%
-        select(-pair_key)
-      
-      actions_out = lapply(seq_len(nrow(actions_df)), function(a)
-      {
-        p1 = actions_df$parent1[a]
-        p2 = actions_df$parent2[a]
-        
-        trans_df = get_transition_df(species, p1, p2) %>% select(-species)
-        trans_df = trans_df %>%
-          left_join(lookup %>% rename(parent1 = genotype,
-                                      parent1_pheno = phenotype,
-                                      parent1_label = label,
-                                      parent1_img_file = img_file,
-                                      parent1_img_html = img_html), by = "parent1") %>%
-          left_join(lookup %>% rename(parent2 = genotype,
-                                      parent2_pheno = phenotype,
-                                      parent2_label = label,
-                                      parent2_img_file = img_file,
-                                      parent2_img_html = img_html), by = "parent2") %>%
-          left_join(lookup %>% rename(offspring = genotype,
-                                      offspring_pheno = phenotype,
-                                      offspring_label = label,
-                                      offspring_img_file = img_file,
-                                      offspring_img_html = img_html), by = "offspring")
-        
-        trans_df %>% nest(transitions = c(offspring, offspring_pheno, prob, offspring_label, offspring_img_file, offspring_img_html))
-      })
-      list(wave = wave_idx, actions = actions_out)
-    })
-    list(waves = waves_out)
-  }
-  
-  wave_parent_genos = function(wave_actions)
-  {
-    df = bind_rows(wave_actions)
-    unique(c(df$parent1, df$parent2))
-  }
-  
-  add_keep_flags = function(plan)
-  {
-    waves = plan$waves
-    n = length(waves)
-    if (n <= 1) return(plan)
-    
-    targets = get_targets()
-    targets = unique(unlist(targets, use.names = FALSE))
-    parents_by_wave = lapply(waves, function(w) wave_parent_genos(w$actions))
-    
-    future_parents = vector("list", n)
-    future_parents[[n]] = character(0)
-    if(n >= 2)
-    {
-      for(i in (n - 1):1) {future_parents[[i]] = unique(c(future_parents[[i + 1]], parents_by_wave[[i + 1]]))}
-    }
-
-    for (i in seq_len(n)) 
-    {
-      keeps = unique(c(future_parents[[i]], targets))
-      waves[[i]]$actions = lapply(waves[[i]]$actions, function(action_tbl) 
-      {
-        action_tbl %>%
-          mutate(transitions = map(transitions, function(tr) {tr %>% mutate(keep = offspring %in% keeps)}))
-      })
-    }
-    
-    plan$waves = waves
-    plan
-  }
-  
   output$downloadBttn = downloadHandler(
     filename = function() {paste0("acnh_policy_", input$planSpecies, "_", input$seed, ".rds")},
     content = function(file) 
@@ -372,13 +365,18 @@ server = function(input, output, session)
       res = plan_result()
       req(res)
       
+      targets = get_targets(rv)
       policy = build_policy_plan(input$planSpecies, res)
-      policy = add_keep_flags(policy)
+      policy = add_keep_flags(policy, targets)
       
       saveRDS(policy, file)
     })
+
+  #############################################################################################################
+  ####################################### Viewing Tab ########################################################
+  #############################################################################################################
   
-  ####################################### View Policy ########################################################3
+  ####################################### View Policy #########################################################
   
   policy_rv = reactiveVal(NULL)
   
@@ -400,54 +398,6 @@ server = function(input, output, session)
     pol = policy_rv()
     req(pol)
     req(pol$waves)
-    
-    as_html = function(x) 
-    {
-      if(is.null(x) || length(x) == 0) return(tags$span("(missing)"))
-      HTML(x[[1]])
-    }
-    
-    prob_fmt = function(p) sprintf("%.3f", as.numeric(p))
-    
-    keep_icon = function(keep)
-    {
-      if(isTRUE(keep)) {tags$span(class = "keep-icon", icon("ok", lib = "glyphicon"))} 
-      else {tags$span(class = "discard-icon", icon("trash", lib = "glyphicon"))}
-    }
-    
-    render_action = function(action_tbl)
-    {
-      p1_html = action_tbl$parent1_img_html
-      p2_html = action_tbl$parent2_img_html
-      trans = action_tbl$transitions[[1]]
-      
-      off_rows = lapply(seq_len(nrow(trans)), function(i) 
-      {
-        tags$div(class = "offspring-row",
-                 tags$div(class = "offspring-prob", prob_fmt(trans$prob[i])),
-                 tags$div(class = "offspring-mid", HTML(trans$offspring_img_html[i])),
-                 keep_icon(trans$keep[i]))
-      })
-      
-      tags$div(class = "action-card",
-               tags$div(class = "action-grid",
-                        tags$div(class = "parents-stack",
-                                 tags$div(class = "parent-row", HTML(p1_html[[1]])),
-                                 tags$div(class = "parent-sep", HTML("&times;")),
-                                 tags$div(class = "parent-row", HTML(p2_html[[1]]))),
-                        tags$div(class = "offspring-stack", off_rows)))
-    }
-    
-    render_wave = function(wave_obj)
-    {
-      wave_idx = wave_obj$wave
-      actions = wave_obj$actions
-      action_cards = lapply(actions, render_action)
-      
-      tags$div(class = "wave-col",
-               tags$div(class = "wave-title", paste0("Step ", wave_idx)),
-               action_cards)
-    }
     
     tags$div(class = "policy-grid",
              lapply(pol$waves, render_wave))
