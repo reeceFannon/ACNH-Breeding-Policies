@@ -69,19 +69,16 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
     - 'success'     : mdp.is_terminal(final_state)
     - 'stats'       : the (possibly updated) action_step_stats
   """
-  transitions = FlowerTransitions()
-  mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
-
   state = root_state
   total_steps = 0
   trajectory: List[Tuple[State, Action]] = []
   current_max_rollout_depth = root_max_rollout_depth
   current_n_simulations = root_n_simulations
   step_stats = StepStats()
-  while (not mdp.is_terminal(state)) and (total_steps < max_episode_steps):
-    # --- dynamic rollout depth from (state, action) step stats ---
-    #actions = mdp.available_actions(state)
-
+  transitions = FlowerTransitions()
+  mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
+  success = False
+  while (not success) and (total_steps < max_episode_steps):
     if current_max_rollout_depth <= 0:
       break
 
@@ -102,17 +99,21 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
 
     # update best action stats and rollout depth
     best_stats = root_stats[best_action]
-    step_stats.update(best_stats["visits"], abs(best_stats["total_reward"]), best_stats["total_sq_reward"])
-    current_max_rollout_depth = int(max(min(step_stats.mean + 3*math.sqrt(step_stats.variance), current_max_rollout_depth), min_depth_floor))
+    step_stats.update(best_stats["visits"], -best_stats["total_reward"], best_stats["total_sq_reward"])
+    mu, sigma = step_stats.mean, math.sqrt(max(step_stats.variance, 0.0))
+    current_max_rollout_depth = int(max(min(mu + 3*sigma, current_max_rollout_depth), min_depth_floor))
 
     # update the number of simulations
     visits = [stats["visits"] for stats in root_stats.values()]
-    p_visit = [v/sum(visits) for v in visits]
-    entropy = -sum(p_v*math.log(p_v) for p_v in p_visit)
-    entropy_ratio = entropy/math.log(len(visits)) # the upper bound on entropy is ln(len(X)), where every x in X is identically equal (no uncertainty)
+    if len(visits) == 0:
+      entropy_ratio = 0.0
+    else:
+      p_visit = [v/sum(visits) for v in visits]
+      entropy = -sum(p_v*math.log(p_v) for p_v in p_visit)
+      entropy_ratio = entropy/math.log(len(visits)) # the upper bound on entropy is ln(len(X)), where every x in X is identically equal (no uncertainty)
     scale_factor = max(entropy_ratio, max_simulations_scale_factor)
     current_n_simulations = int(max(scale_factor*current_n_simulations, min_n_simulations)) # update simulations in accordance with uncertainty/precision about actions
-      
-  success = mdp.is_terminal(state)
+    
+    success = mdp.is_terminal(state)
 
   return {"trajectory": trajectory, "final_state": state, "total_steps": total_steps, "success": success}

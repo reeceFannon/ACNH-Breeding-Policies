@@ -20,15 +20,15 @@ body = dashboardBody(tags$head(tags$style(HTML(".picker-row{display: flex; align
                                                 .bootstrap-select > .dropdown-toggle{overflow-x: auto; white-space: nowrap;}
                                                 .policy-viewer-wrap{overflow-x: auto; overflow-y: visible; padding-bottom: 8px;}
                                                 .policy-grid{display: flex; gap: 18px; align-items: flex-start;}
-                                                .wave-col{min-width: 520px; max-width: 620px; background: #f7f7f7; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px;}
+                                                .wave-col{min-width: 520px; max-width: 620px; background: #42B348; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px;}
                                                 .wave-title{font-weight: 800; margin-bottom: 10px; font-size: 16px;}
-                                                .action-card{background: white; border: 1px solid #e6e6e6; border-radius: 12px; padding: 12px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.06);}
-                                                .action-grid{display: grid; grid-template-columns: 230px 1fr; column-gap: 14px; align-items: start;}
-                                                .parents-stack{display: flex; flex-direction: column; gap: 8px;}
-                                                .parent-row .picker-row{display: flex; align-items: flex-start; gap: 10px;}
-                                                .parent-sep{text-align: center; font-size: 18px; font-weight: 900; line-height: 1; opacity: 0.55; margin: 2px 0;}
-                                                .offspring-stack{display: flex; flex-direction: column; gap: 10px;}
-                                                .offspring-row{display: grid; grid-template-columns: 78px 1fr 34px; align-items: start; gap: 10px;}
+                                                .action-card{background: #FFFEE3; border: 1px solid #e6e6e6; border-radius: 12px; padding: 12px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.06);}
+                                                .action-grid{display: grid; grid-template-columns: 180px 1fr; column-gap: 0px; align-items: start;}
+                                                .parents-stack{display: flex; flex-direction: column; gap: 4px;}
+                                                .parent-row .picker-row{display: flex; align-items: flex-start; gap: 6px;}
+                                                .parent-sep{text-align: center; font-size: 18px; font-weight: 900; line-height: .9; opacity: 0.55; margin: 0;}
+                                                .offspring-stack{display: flex; flex-direction: column; gap: 8px;}
+                                                .offspring-row{display: grid; grid-template-columns: 60px 1fr 20px; align-items: start; gap: 10px;}
                                                 .offspring-prob{font-family: monospace; text-align: right; opacity: 0.85; font-size: 13px; padding-top: 4px;}
                                                 .offspring-mid .picker-row{display: flex; align-items: center; gap: 8px;}
                                                 .keep-icon, .discard-icon{text-align: center; font-size: 16px; padding-top: 4px;}
