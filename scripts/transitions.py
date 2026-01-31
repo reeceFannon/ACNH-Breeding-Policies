@@ -102,7 +102,7 @@ class TransitionTensor:
     genotype_to_idx: Dict[str, int]      # genotype -> index (0..N-1)
     idx_to_genotype: List[str]           # index -> genotype
 
-class TransitionBuilder:
+class TransitionTensorBuilder:
   def __init__(self, paths: FlowerDataPaths | None = None):
     self.paths = paths or FlowerDataPaths()
 
@@ -154,4 +154,4 @@ class TransitionBuilder:
       if not torch.allclose(T, T.transpose(0, 1), atol = 1e-6, rtol = 0):
         raise ValueError("T is not symmetric in parent1/parent2 after fill.")
 
-      return TransitionTensor(T=T, genotype_to_idx=genotype_to_idx, idx_to_genotype=idx_to_genotype)
+      return TransitionTensor(T = T, genotype_to_idx = genotype_to_idx, idx_to_genotype = idx_to_genotype)
