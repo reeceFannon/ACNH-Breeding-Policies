@@ -106,52 +106,52 @@ class TransitionTensorBuilder:
   def __init__(self, paths: FlowerDataPaths | None = None):
     self.paths = paths or FlowerDataPaths()
 
-    def build_transition_tensor(self, species: str, *, device: Optional[torch.device] = None, dtype: torch.dtype = torch.float32) -> TransitionTensor:
-      """
-      Builds T[parent1, parent2, offspring] = P(offspring | parent1,parent2)
-      from self.paths.transitions_csv using polars.
-      """
-      lf = pl.scan_csv(self.paths.transitions_csv)
-      lf = lf.filter(pl.col("species") == species).select(["parent1", "parent2", "offspring", "prob"])
+  def build_transition_tensor(self, species: str, *, device: Optional[torch.device] = None, dtype: torch.dtype = torch.float32) -> TransitionTensor:
+    """
+    Builds T[parent1, parent2, offspring] = P(offspring | parent1,parent2)
+    from self.paths.transitions_csv using polars.
+    """
+    lf = pl.scan_csv(self.paths.transitions_csv)
+    lf = lf.filter(pl.col("species") == species).select(["parent1", "parent2", "offspring", "prob"])
 
-      df = lf.collect()
-      if df.height == 0:
-        raise ValueError(f"No rows found for species={species!r} in {self.paths.transitions_csv}")
+    df = lf.collect()
+    if df.height == 0:
+      raise ValueError(f"No rows found for species={species!r} in {self.paths.transitions_csv}")
 
-      genotypes = sorted(set(df["parent1"].to_list()) | set(df["parent2"].to_list()) | set(df["offspring"].to_list()))
-      N = len(genotypes)
-      genotype_to_idx = {g: i for i, g in enumerate(genotypes)}
-      idx_to_genotype = genotypes
+    genotypes = sorted(set(df["parent1"].to_list()) | set(df["parent2"].to_list()) | set(df["offspring"].to_list()))
+    N = len(genotypes)
+    genotype_to_idx = {g: i for i, g in enumerate(genotypes)}
+    idx_to_genotype = genotypes
 
-      # Map genotype strings to integer indices using replace_strict
-      # (replace_strict will error if a value isn't in the mapping)
-      mapping_expr = pl.col  # small alias
-      df_idx = df.with_columns(mapping_expr("parent1").replace_strict(genotype_to_idx).cast(pl.UInt8).alias("p1"),
-                               mapping_expr("parent2").replace_strict(genotype_to_idx).cast(pl.UInt8).alias("p2"),
-                               mapping_expr("offspring").replace_strict(genotype_to_idx).cast(pl.UInt8).alias("off"),
-                               mapping_expr("prob").cast(pl.Float32).alias("prob_f32")).select(["p1", "p2", "off", "prob_f32"])
-    
-      p1 = torch.tensor(df_idx["p1"].to_numpy(), device = device, dtype = torch.long)
-      p2 = torch.tensor(df_idx["p2"].to_numpy(), device = device, dtype = torch.long)
-      off = torch.tensor(df_idx["off"].to_numpy(), device = device, dtype = torch.long)
-      prob = torch.tensor(df_idx["prob_f32"].to_numpy(), device = device, dtype = dtype)
+    # Map genotype strings to integer indices using replace_strict
+    # (replace_strict will error if a value isn't in the mapping)
+    mapping_expr = pl.col  # small alias
+    df_idx = df.with_columns(mapping_expr("parent1").replace_strict(genotype_to_idx).cast(pl.UInt8).alias("p1"),
+                             mapping_expr("parent2").replace_strict(genotype_to_idx).cast(pl.UInt8).alias("p2"),
+                             mapping_expr("offspring").replace_strict(genotype_to_idx).cast(pl.UInt8).alias("off"),
+                             mapping_expr("prob").cast(pl.Float32).alias("prob_f32")).select(["p1", "p2", "off", "prob_f32"])
+  
+    p1 = torch.tensor(df_idx["p1"].to_numpy(), device = device, dtype = torch.long)
+    p2 = torch.tensor(df_idx["p2"].to_numpy(), device = device, dtype = torch.long)
+    off = torch.tensor(df_idx["off"].to_numpy(), device = device, dtype = torch.long)
+    prob = torch.tensor(df_idx["prob_f32"].to_numpy(), device = device, dtype = dtype)
 
-      # Allocate and fill T
-      T = torch.zeros((N, N, N), device = device, dtype = dtype)
-      T[p1, p2, off] = prob
-      T[p2, p1, off] = prob
+    # Allocate and fill T
+    T = torch.zeros((N, N, N), device = device, dtype = dtype)
+    T[p1, p2, off] = prob
+    T[p2, p1, off] = prob
 
-      pair_sums = T.sum(dim=2)  # [N, N]
-      present = pair_sums > 0
-      if present.any():
-        max_err = (pair_sums[present] - 1.0).abs().max().item()
-        if max_err > 1e-4:
-          raise ValueError(
-              f"Offspring probability sums not ~1 for some (parent1,parent2) pairs. "
-              f"max_err={max_err:.6g}"
-          )
+    pair_sums = T.sum(dim=2)  # [N, N]
+    present = pair_sums > 0
+    if present.any():
+      max_err = (pair_sums[present] - 1.0).abs().max().item()
+      if max_err > 1e-4:
+        raise ValueError(
+            f"Offspring probability sums not ~1 for some (parent1,parent2) pairs. "
+            f"max_err={max_err:.6g}"
+        )
 
-      if not torch.allclose(T, T.transpose(0, 1), atol = 1e-6, rtol = 0):
-        raise ValueError("T is not symmetric in parent1/parent2 after fill.")
+    if not torch.allclose(T, T.transpose(0, 1), atol = 1e-6, rtol = 0):
+      raise ValueError("T is not symmetric in parent1/parent2 after fill.")
 
-      return TransitionTensor(T = T, genotype_to_idx = genotype_to_idx, idx_to_genotype = idx_to_genotype)
+    return TransitionTensor(T = T, genotype_to_idx = genotype_to_idx, idx_to_genotype = idx_to_genotype)
