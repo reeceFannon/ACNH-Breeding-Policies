@@ -61,7 +61,7 @@ class BreedingPolicyNet(nn.Module):
   def N(self) -> int:
     return int(self._N.item())
 
-  def forward(self, x0: torch.Tensor, *, eps_present: float = 0.0, save_Q: bool = False) -> torch.Tensor:
+  def forward(self, x0: torch.Tensor, target_idx: torch.LongTensor, *, eps_present: float = 0.0, save_Q: bool = False) -> torch.Tensor:
     """
     x0: [N] expected counts
     eps_present: treat x > eps_present as present for masking
@@ -79,18 +79,20 @@ class BreedingPolicyNet(nn.Module):
       x_p1 = x.index_select(0, Ei)              # [P]
       present_p1 = (x_p1 > eps_present)         # [P]
       present_p2 = (x > eps_present)            # [N]
+      present_p2[target_idx] = False            # Ban targets as parents
 
       # Allowed parent2 choices depend on parent2 availability; rows also depend on parent1 availability
       allowed = present_p1[:, None] & present_p2[None, :]   # [P, N]
-      Q = masked_row_softmax(logits, allowed, dim = 1)         # [P, N]
+      Q = masked_row_softmax(logits, allowed, dim = 1)      # [P, N]
 
-      if save_Q:
-        self.Q[i] = Q.detach() # remove autograd graph
+      if save_Q: self.Q[i] = Q.detach() # remove autograd graph
 
       # offspring[k] = sum_a x_p1[a] * sum_b Q[a,b] * Ti[a,b,k]
       offspring = torch.einsum("a,ab,abk->k", x_p1, Q, Ti)    # [N]
+      clones = torch.zeros_like(x)
+      clones[target_idx] = x[target_idx]
 
-      x = torch.clamp(x + offspring, min = 0.0)
+      x = torch.clamp(x + offspring + clones, min = 0.0)
 
     return x
 
@@ -99,7 +101,7 @@ def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torc
   for t in range(steps):
     opt.zero_grad()
 
-    x_final = model(x0, eps_present = eps_present, save_Q = False)
+    x_final = model(x0, target_idx, eps_present = eps_present, save_Q = False)
     target_mass = x_final.index_select(0, target_idx).sum()
     loss = -target_mass
     loss.backward()
