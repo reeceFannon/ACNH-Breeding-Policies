@@ -118,6 +118,6 @@ def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torc
   # One final pass to cache Q_i using the final parameters
   model.eval()
   with torch.no_grad():
-    _ = model(x0, eps_present = eps_present, save_Q = True) # only save once at end to avoid overhead
+    _ = model(x0, target_idx, eps_present = eps_present, save_Q = True) # only save once at end to avoid overhead
   
   return model
