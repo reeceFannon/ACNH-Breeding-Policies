@@ -11,9 +11,8 @@ def sample_next_state(mdp: FlowerMDP, state: State, action: Action, optimize: bo
     a, b = canonical_pair(*action)
     a, b = transition_tensor.genotype_to_idx[a], transition_tensor.genotype_to_idx[b]
     probs = transition_tensor.T[a, b, :]
-    offspring = transition_tensor.idx_to_genotype
-    g = np.random.choice(offspring, p = probs)
-    return frozenset(set(state) | {g})
+    offspring = transition_tensor.idx_to_genotype[torch.multinomial(probs, 1)]
+    return frozenset(set(state) | {offspring})
   
   dist: Dict[State, float] = mdp.next_state_distribution(state, action)
   states = list(dist.keys())
