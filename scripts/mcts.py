@@ -1,19 +1,26 @@
 import math
 import random
-from typing import Optional, Dict, List
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
-from transitions import FlowerTransitions
+from transitions import FlowerTransitions, canonical_pair
 from mdp import FlowerMDP, State, Action
 
-def sample_next_state(mdp: FlowerMDP, state: State, action: Action) -> State:
+def sample_next_state(mdp: FlowerMDP, state: State, action: Action, optimize: bool = False, transition_tensor: TransitionTensor = None) -> State:
   """Sample a single next state from the transition distribution."""
+  if optimize:
+    a, b = canonical_pair(*action)
+    a, b = transition_tensor.genotype_to_idx[a], transition_tensor.genotype_to_idx[b]
+    probs = transition_tensor.T[a, b, :]
+    offspring = transition_tensor.idx_to_genotype
+    g = np.random.choice(offspring, p = probs)
+    return frozenset(set(state) | {g})
+  
   dist: Dict[State, float] = mdp.next_state_distribution(state, action)
   states = list(dist.keys())
   probs = list(dist.values())
   return random.choices(states, weights = probs, k = 1)[0]
 
-def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20) -> float:
+def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20, optimize: bool = False, transition_tensor: TransitionTensor = None) -> float:
   """
   Random policy rollout from start_state.
   Returns reward = -steps to terminal (more negative if slower).
@@ -28,7 +35,7 @@ def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20) -> f
       return float(-max_depth)
 
     action = random.choice(actions)
-    state = sample_next_state(mdp, state, action)
+    state = sample_next_state(mdp, state, action, optimize = optimize, transition_tensor = transition_tensor)
 
   # didn't reach terminal within horizon
   return float(-max_depth)
@@ -67,7 +74,7 @@ class MCTSNode:
         best = child
     return best
 
-def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0)) -> MCTSNode:
+def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), optimize: bool = False, transition_tensor: TransitionTensor = None) -> MCTSNode:
   """
   Run MCTS from the root_state and return the root node
   with its tree of children filled in.
@@ -84,14 +91,14 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
     # 2. EXPANSION: expand one untried action (if any and not terminal)
     if not mdp.is_terminal(node.state) and node.untried_actions:
       action = node.untried_actions.pop()
-      next_state = sample_next_state(mdp, node.state, action)
+      next_state = sample_next_state(mdp, node.state, action, optimize = optimize, transition_tensor = transition_tensor)
 
       child = MCTSNode(state = next_state, parent = node, action_from_parent = action, untried_actions = mdp.available_actions(next_state))
       node.children[action] = child
       node = child  # next we rollout from child
 
     # 3. SIMULATION (ROLLOUT): from this leaf node
-    reward = random_rollout(mdp, node.state, max_depth = max_rollout_depth)
+    reward = random_rollout(mdp, node.state, max_depth = max_rollout_depth, optimize = optimize, transition_tensor = transition_tensor)
 
     # 4. BACKPROPAGATION
     while node is not None:
@@ -102,7 +109,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
 
   return root
 
-def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None) -> Dict[str, object]:
+def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, optimize: bool = False) -> Dict[str, object]:
   state = root_state
   total_steps = 0
   trajectory: List[Tuple[State, Action]] = []
@@ -113,13 +120,20 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
   success = False
   episode_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
   random.seed(episode_seed)
+  
+  if optimize:
+    from transitions import TransitionTensor, TransitionTensorBuilder
+    transition_tensor = TransitionTensorBuilder().build_transition_tensor(mdp.species)
+  else:
+    transition_tensor = None
+    
   while (not success) and (total_steps < max_episode_steps):
     if current_max_rollout_depth <= 0:
       break
 
     # --- parallel root MCTS from current state ---
     mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
-    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c)
+    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c, optimize, transition_tensor)
     root_stats = extract_root_action_stats(root)
     best_action = best_root_action_from_stats(root_stats)
 
@@ -129,7 +143,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
     trajectory.append((state, best_action))
 
     # sample next state in the *main* process
-    next_state = sample_next_state(mdp, state, best_action)
+    next_state = sample_next_state(mdp, state, best_action, optimize = optimize, transition_tensor = transition_tensor)
     state = next_state
     total_steps += 1
     print(f"Finished step {total_steps}: Chose action {best_action} with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
