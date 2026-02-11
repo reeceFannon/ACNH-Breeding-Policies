@@ -18,10 +18,7 @@ class BreedingPolicyNet(nn.Module):
     self.num_waves = num_waves
     self.register_buffer("_N", torch.tensor(N, dtype = torch.long))
     self.register_buffer("T", T)
-
-    # Learnable logits per wave: [P_i, N]
-    self.logits = nn.ParameterList([nn.Parameter(init_logits_scale*torch.randn(N, N)) for _ in range(self.num_waves])
-    self.Q: List[torch.Tensor | None] = [None]*self.num_waves
+    self.logits = nn.Parameter(init_logits_scale*torch.randn(N, N)) # Learnable logits
 
   @property
   def N(self) -> int:
@@ -36,26 +33,25 @@ class BreedingPolicyNet(nn.Module):
       raise ValueError(f"x0 must be shape [N={self.N}], got {tuple(x0.shape)}")
 
     x = torch.clamp(x0, min = 0.0)
+    Q: List[torch.tensor] = []
 
     for i in range(self.num_waves):
-      logits = self.logits[i]                # [N, N]
-
-      present_p1 = (x > eps_present)         # [N]
-      present_p2 = (x > eps_present)         # [N]
-      present_p2[target_idx] = False         # Ban targets as parents
+      present_p1 = (x > eps_present)      # [N]
+      present_p2 = (x > eps_present)      # [N]
+      present_p2[target_idx] = False      # Ban targets as parents
       # Allowed parent2 choices depend on parent2 availability; rows also depend on parent1 availability
-      allowed = present_p1[:, None] & present_p2[None, :]   # [N, N]
-      Q = masked_row_softmax(logits, allowed, dim = 1)      # [N, N]
+      allowed = present_p1[:, None] & present_p2[None, :]        # [N, N]
+      Qi = masked_row_softmax(self.logits, allowed, dim = 1)     # [N, N]
 
-      if save_Q: self.Q[i] = Q.detach() # remove autograd graph
+      if save_Q: Q.append(Qi)
 
       # offspring[k] = sum_a x_p1[a] * sum_b Q[a,b] * Ti[a,b,k]
-      offspring = torch.einsum("a,ab,abk->k", x, Q, self.T)    # [N]
+      offspring = torch.einsum("a,ab,abk->k", x, Qi, self.T)    # [N]
       #clones = torch.zeros_like(x)
       #clones[target_idx] = x[target_idx]
-      x = torch.clamp(x + offspring + clones, min = 0.0)
+      x = torch.clamp(x + offspring, min = 0.0)
 
-    return x
+    return x, Q
 
 def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.LongTensor, *, steps: int = 2000, lr: float = 1e-2, eps_present: float = 1e-6, clip_grad: float = 1.0, log_steps: int = 50):
   opt = torch.optim.Adam(model.parameters(), lr = lr)
@@ -82,3 +78,22 @@ def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torc
     _ = model(x0, target_idx, eps_present = eps_present, save_Q = True) # only save once at end to avoid overhead
   
   return model
+
+def gradients(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.LongTensor, *, eps_present: float = 1e-6) -> dict:
+  model.train(False)
+
+  # Ensure x0 requires no grad; we want grads w.r.t. policy only.
+  x0_ = x0.detach()
+  x_final, Q = model(x0_, target_idx, eps_present = eps_present, return_Qs = True)
+  target_mass = x_final.index_select(0, target_idx).sum()
+
+  pars = [model.logits] + Q
+  grad_pars = torch.autograd.grad(target_mass, pars, retain_graph = False, allow_unused = False)
+  grad_logits = grad_pars[0]
+  grad_Q = grad_pars[1:]
+
+  return {"target_mass": float(target_mass.detach().cpu().item()),
+          "logits": model.logits.detach(),
+          "Q_by_wave": [q.detach() for q in Q],
+          "grad_logits": grad_logits.detach(),
+          "grad_Q_by_wave": [dq.detach() for dq in grad_Q]}
