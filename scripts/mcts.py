@@ -5,13 +5,14 @@ from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
 from transitions import FlowerTransitions, canonical_pair
 from mdp import FlowerMDP, State, Action
 
-def sample_next_state(mdp: FlowerMDP, state: State, action: Action, optimize: bool = False, transition_tensor: TransitionTensor = None) -> State:
+def sample_next_state(mdp: FlowerMDP, state: State, action: Action, heuristic: bool = False, transition_tensor: TransitionTensor = None) -> State:
   """Sample a single next state from the transition distribution."""
-  if optimize:
+  if heuristic:
     a, b = canonical_pair(*action)
     a, b = transition_tensor.genotype_to_idx[a], transition_tensor.genotype_to_idx[b]
     probs = transition_tensor.T[a, b, :]
-    offspring = transition_tensor.idx_to_genotype[torch.multinomial(probs, 1)]
+    k = int(torch.multinomial(probs, 1).item())
+    offspring = transition_tensor.idx_to_genotype[k]
     return frozenset(set(state) | {offspring})
   
   dist: Dict[State, float] = mdp.next_state_distribution(state, action)
@@ -19,7 +20,7 @@ def sample_next_state(mdp: FlowerMDP, state: State, action: Action, optimize: bo
   probs = list(dist.values())
   return random.choices(states, weights = probs, k = 1)[0]
 
-def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20, optimize: bool = False, transition_tensor: TransitionTensor = None) -> float:
+def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20, heuristic: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None) -> float:
   """
   Random policy rollout from start_state.
   Returns reward = -steps to terminal (more negative if slower).
@@ -31,22 +32,21 @@ def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20, opti
     actions = mdp.available_actions(state)
     if not actions: return float(-max_depth) # dead-end; can't continue
 
-    if optimize:
-      bias = []
-      dQ = gradients.grad_Q_by_wave[t]
-      for action in actions:
-        a, b = canonical_pair(*action)
-        a, b = transition_tensor.genotype_to_idx[a], transition_tensor.genotype_to_idx[b]
-        dq = float(max(dQ[a, b], dQ[b, a], 0.0))
-        bias.append(dq)
+    if heuristic:
+      dQ = gradients["grad_Q_by_wave"][t]
+      idx_i = torch.tensor([genotype_to_idx[a] for a, _ in actions], dtype = torch.long, device = dQ.device)
+      idx_j = torch.tensor([genotype_to_idx[b] for _, b in actions], dtype = torch.long, device = dQ.device)
+      dQ_ij = dQ[idx_i, idx_j]
+      dQ_ji = dQ[idx_j, idx_i]
+      bias = torch.maximum(dQ_ij, dQ_ji)
+      bias = torch.clamp(bias, min = 0.0)
       action = random.choices(actions, weights = bias, k = 1)[0]
     else:
       action = random.choice(actions)
 
-    state = sample_next_state(mdp, state, action, optimize = optimize, transition_tensor = transition_tensor)
+    state = sample_next_state(mdp, state, action, heuristic = heuristic, transition_tensor = transition_tensor)
 
-  # didn't reach terminal within horizon
-  return float(-max_depth)
+  return float(-max_depth) # didn't reach terminal within horizon
 
 @dataclass
 class MCTSNode:
@@ -82,21 +82,21 @@ class MCTSNode:
         best = child
     return best
 
-def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), optimize: bool = False, transition_tensor: TransitionTensor = None) -> MCTSNode:
+def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), heuristic: bool = False, transition_tensor: TransitionTensor = None, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0) -> MCTSNode:
   """
   Run MCTS from the root_state and return the root node
   with its tree of children filled in.
   """
   root = MCTSNode(state = root_state, parent = None, action_from_parent = None, untried_actions = mdp.available_actions(root_state))
 
-  if optimize:
+  if heuristic:
     model = BreedingPolicyNet(transition_tensor, max_rollout_depth, init_logits_scale = init_logits_scale)
     x = torch.zeros(model.N, device = transition_tensor.device)
-    start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state[0]]
+    start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state]
     x[start_genos] = 1.0
     targets = []
     for group in mdp.targets: targets.extend([transition_tensor.genotype_to_idx[target] for target in group])
-    optimize_policy(model, x, targets, steps = steps, lr = lr, log_steps = log_steps)
+    optimize_policy(model, x, targets, steps = optim_steps, lr = lr, log_steps = log_steps)
     gradients = gradients(model, x, targets, eps_present = eps_present)
 
   for _ in range(n_simulations):
@@ -109,14 +109,14 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
     # 2. EXPANSION: expand one untried action (if any and not terminal)
     if not mdp.is_terminal(node.state) and node.untried_actions:
       action = node.untried_actions.pop()
-      next_state = sample_next_state(mdp, node.state, action, optimize = optimize, transition_tensor = transition_tensor)
+      next_state = sample_next_state(mdp, node.state, action, heuristic = heuristic, transition_tensor = transition_tensor)
 
       child = MCTSNode(state = next_state, parent = node, action_from_parent = action, untried_actions = mdp.available_actions(next_state))
       node.children[action] = child
       node = child  # next we rollout from child
 
     # 3. SIMULATION (ROLLOUT): from this leaf node
-    reward = random_rollout(mdp, node.state, max_depth = max_rollout_depth, optimize = optimize, transition_tensor = transition_tensor, gradients = gradients)
+    reward = random_rollout(mdp, node.state, max_depth = max_rollout_depth, heuristic = heuristic, transition_tensor = transition_tensor, gradients = gradients)
 
     # 4. BACKPROPAGATION
     while node is not None:
@@ -127,7 +127,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
 
   return root
 
-def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, optimize: bool = False) -> Dict[str, object]:
+def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0) -> Dict[str, object]:
   state = root_state
   total_steps = 0
   trajectory: List[Tuple[State, Action]] = []
@@ -139,7 +139,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
   episode_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
   random.seed(episode_seed)
   
-  if optimize:
+  if heuristic:
     import torch
     from transitions import TransitionTensor, TransitionTensorBuilder
     from optimize import BreedingPolicyNet, optimize_policy, gradients
@@ -152,7 +152,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
 
     # --- MCTS from current state ---
     mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
-    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c, optimize, transition_tensor)
+    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, transition_tensor)
     root_stats = extract_root_action_stats(root)
     best_action = best_root_action_from_stats(root_stats)
 
@@ -161,7 +161,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
     trajectory.append((state, best_action))
 
     # sample next state in the *main* process
-    next_state = sample_next_state(mdp, state, best_action, optimize = optimize, transition_tensor = transition_tensor)
+    next_state = sample_next_state(mdp, state, best_action, heuristic = heuristic, transition_tensor = transition_tensor)
     state = next_state
     total_steps += 1
     print(f"Finished step {total_steps}: Chose action {best_action} with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
