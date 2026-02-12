@@ -12,7 +12,7 @@ def masked_row_softmax(logits: torch.Tensor, mask: torch.Tensor, dim: int = -1) 
   return probs
 
 class BreedingPolicyNet(nn.Module):
-  def __init__(self, Ti_list: List[torch.Tensor], num_waves: int, *, init_logits_scale: float = 0.01):
+  def __init__(self, transition_tensor: TransitionTensor, num_waves: int, *, init_logits_scale: float = 0.01):
     super().__init__()
     N = int(T.shape[0])
     self.num_waves = num_waves
