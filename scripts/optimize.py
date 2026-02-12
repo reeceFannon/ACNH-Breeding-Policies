@@ -1,6 +1,7 @@
 from typing import List
 import torch
 import torch.nn as nn
+from transitions import TransitionTensor
 
 def masked_row_softmax(logits: torch.Tensor, mask: torch.Tensor, dim: int = -1) -> torch.Tensor:
   neg_large = torch.finfo(logits.dtype).min
