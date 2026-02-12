@@ -2,7 +2,7 @@ import math
 import random
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
-from transitions import FlowerTransitions, canonical_pair
+from transitions import FlowerTransitions, canonical_pair, TransitionTensor
 from mdp import FlowerMDP, State, Action
 
 def sample_next_state(mdp: FlowerMDP, state: State, action: Action, heuristic: bool = False, transition_tensor: TransitionTensor = None) -> State:
@@ -88,6 +88,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
   with its tree of children filled in.
   """
   root = MCTSNode(state = root_state, parent = None, action_from_parent = None, untried_actions = mdp.available_actions(root_state))
+  gradients = None
 
   if heuristic:
     model = BreedingPolicyNet(transition_tensor, max_rollout_depth, init_logits_scale = init_logits_scale)
@@ -141,7 +142,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
   
   if heuristic:
     import torch
-    from transitions import TransitionTensor, TransitionTensorBuilder
+    from transitions import TransitionTensorBuilder
     from optimize import BreedingPolicyNet, optimize_policy, gradients
     transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
   else:
