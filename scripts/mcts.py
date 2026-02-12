@@ -94,7 +94,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
 
   if heuristic:
     model = BreedingPolicyNet(transition_tensor, max_rollout_depth, init_logits_scale = init_logits_scale)
-    x = torch.zeros(model.N, device = transition_tensor.device)
+    x = torch.zeros(model.N, device = transition_tensor.T.device)
     start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state]
     x[start_genos] = 1.0
     targets = []
