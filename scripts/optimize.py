@@ -12,7 +12,7 @@ def masked_row_softmax(logits: torch.Tensor, mask: torch.Tensor, dim: int = -1) 
   return probs
 
 class BreedingPolicyNet(nn.Module):
-  def __init__(self, transition_tensor: TransitionTensor, num_waves: int, *, init_logits_scale: float = 0.01):
+  def __init__(self, T: TransitionTensor, num_waves: int, *, init_logits_scale: float = 0.01):
     super().__init__()
     N = int(T.shape[0])
     self.num_waves = num_waves
@@ -33,7 +33,7 @@ class BreedingPolicyNet(nn.Module):
       raise ValueError(f"x0 must be shape [N={self.N}], got {tuple(x0.shape)}")
 
     x = torch.clamp(x0, min = 0.0)
-    Q: List[torch.tensor] = []
+    Q: List[torch.Tensor] = []
 
     for i in range(self.num_waves):
       present_p1 = (x > eps_present)      # [N]
@@ -58,7 +58,7 @@ def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torc
   for step in range(steps):
     opt.zero_grad()
 
-    x_final = model(x0, target_idx, eps_present = eps_present, save_Q = False)
+    x_final, _ = model(x0, target_idx, eps_present = eps_present, save_Q = False)
     target_mass = x_final.index_select(0, target_idx).sum()
     loss = -target_mass
     loss.backward()
@@ -75,7 +75,7 @@ def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torc
   # One final pass to cache Q_i using the final parameters
   model.eval()
   with torch.no_grad():
-    _ = model(x0, target_idx, eps_present = eps_present, save_Q = True) # only save once at end to avoid overhead
+    _, Q = model(x0, target_idx, eps_present = eps_present, save_Q = True) # only save once at end to avoid overhead
   
   return model
 
@@ -84,7 +84,7 @@ def gradients(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.Long
 
   # Ensure x0 requires no grad; we want grads w.r.t. policy only.
   x0_ = x0.detach()
-  x_final, Q = model(x0_, target_idx, eps_present = eps_present, return_Qs = True)
+  x_final, Q = model(x0_, target_idx, eps_present = eps_present, save_Q = True)
   target_mass = x_final.index_select(0, target_idx).sum()
 
   pars = [model.logits] + Q
