@@ -1,9 +1,11 @@
 import math
 import random
+import torch
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
 from transitions import FlowerTransitions, canonical_pair, TransitionTensor
 from mdp import FlowerMDP, State, Action
+from optimize import BreedingPolicyNet, optimize_policy, gradients
 
 def sample_next_state(mdp: FlowerMDP, state: State, action: Action, heuristic: bool = False, transition_tensor: TransitionTensor = None) -> State:
   """Sample a single next state from the transition distribution."""
@@ -141,9 +143,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
   random.seed(episode_seed)
   
   if heuristic:
-    import torch
     from transitions import TransitionTensorBuilder
-    from optimize import BreedingPolicyNet, optimize_policy, gradients
     transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
   else:
     transition_tensor = None
