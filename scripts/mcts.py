@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
 from transitions import FlowerTransitions, canonical_pair, TransitionTensor
 from mdp import FlowerMDP, State, Action
-from optimize import BreedingPolicyNet, optimize_policy, gradients
+from optimize import BreedingPolicyNet, optimize_policy, policy_grad
 
 def sample_next_state(mdp: FlowerMDP, state: State, action: Action, heuristic: bool = False, transition_tensor: TransitionTensor = None) -> State:
   """Sample a single next state from the transition distribution."""
@@ -36,8 +36,8 @@ def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20, heur
 
     if heuristic:
       dQ = gradients["grad_Q_by_wave"][t]
-      idx_i = torch.tensor([genotype_to_idx[a] for a, _ in actions], dtype = torch.long, device = dQ.device)
-      idx_j = torch.tensor([genotype_to_idx[b] for _, b in actions], dtype = torch.long, device = dQ.device)
+      idx_i = torch.tensor([transition_tensor.genotype_to_idx[a] for a, _ in actions], dtype = torch.long, device = dQ.device)
+      idx_j = torch.tensor([transition_tensor.genotype_to_idx[b] for _, b in actions], dtype = torch.long, device = dQ.device)
       dQ_ij = dQ[idx_i, idx_j]
       dQ_ji = dQ[idx_j, idx_i]
       bias = torch.maximum(dQ_ij, dQ_ji)
@@ -99,8 +99,9 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
     x[start_genos] = 1.0
     targets = []
     for group in mdp.targets: targets.extend([transition_tensor.genotype_to_idx[target] for target in group])
+    targets = torch.tensor(targets, device = transition_tensor.T.device)
     optimize_policy(model, x, targets, steps = optim_steps, lr = lr, log_steps = log_steps)
-    gradients = gradients(model, x, targets, eps_present = eps_present)
+    gradients = policy_grad(model, x, targets, eps_present = eps_present)
 
   for _ in range(n_simulations):
     node = root
@@ -153,7 +154,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
 
     # --- MCTS from current state ---
     mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
-    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, transition_tensor)
+    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, transition_tensor, init_logits_scale, optim_steps, lr, log_steps, eps_present)
     root_stats = extract_root_action_stats(root)
     best_action = best_root_action_from_stats(root_stats)
 
@@ -162,7 +163,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
     trajectory.append((state, best_action))
 
     # sample next state in the *main* process
-    next_state = sample_next_state(mdp, state, best_action, heuristic = heuristic, transition_tensor = transition_tensor)
+    next_state = sample_next_state(mdp, state, best_action, heuristic, transition_tensor)
     state = next_state
     total_steps += 1
     print(f"Finished step {total_steps}: Chose action {best_action} with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
