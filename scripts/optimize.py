@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict, Any
 import torch
 import torch.nn as nn
 from transitions import TransitionTensor
@@ -81,11 +81,10 @@ def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torc
   
   return model
 
-def gradients(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.LongTensor, *, eps_present: float = 1e-6) -> dict:
+def policy_grad(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.LongTensor, *, eps_present: float = 1e-6) -> Dict[str, Any]:
   model.train(False)
 
-  # Ensure x0 requires no grad; we want grads w.r.t. policy only.
-  x0_ = x0.detach()
+  x0_ = x0.detach() # Ensure x0 requires no grad; we want grads w.r.t. policy only.
   x_final, Q = model(x0_, target_idx, eps_present = eps_present, save_Q = True)
   target_mass = x_final.index_select(0, target_idx).sum()
 
