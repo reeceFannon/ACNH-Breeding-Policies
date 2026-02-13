@@ -4,10 +4,8 @@ import torch.nn as nn
 from transitions import TransitionTensor
 
 def masked_row_softmax(logits: torch.Tensor, mask: torch.Tensor, dim: int = -1) -> torch.Tensor:
-  neg_large = torch.finfo(logits.dtype).min
-  masked_logits = torch.where(mask, logits, torch.tensor(neg_large, device = logits.device, dtype = logits.dtype))
+  masked_logits = logits.masked_fill(~mask, float("-inf"))
   probs = torch.softmax(masked_logits, dim = dim)
-
   allowed_count = mask.sum(dim = dim, keepdim = True)
   probs = torch.where(allowed_count > 0, probs, torch.zeros_like(probs))
   return probs
