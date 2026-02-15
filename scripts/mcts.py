@@ -120,7 +120,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, num_waves: int, n_simulations
       node = child  # next we rollout from child
 
     # 3. SIMULATION (ROLLOUT): from this leaf node
-    reward = random_rollout(mdp, node.state, max_depth = max_rollout_depth, heuristic = heuristic, transition_tensor = transition_tensor, gradients = gradients)
+    reward = random_rollout(mdp, node.state, max_depth = num_waves, heuristic = heuristic, transition_tensor = transition_tensor, gradients = gradients)
 
     # 4. BACKPROPAGATION
     while node is not None:
@@ -154,7 +154,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
 
     # --- MCTS from current state ---
     mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
-    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, cloning, transition_tensor, init_logits_scale, optim_steps, lr, log_steps, eps_present)
+    root = mcts_search(mdp, state, num_waves, current_n_simulations, current_max_rollout_depth, c, heuristic, cloning, transition_tensor, init_logits_scale, optim_steps, lr, log_steps, eps_present)
     root_stats = extract_root_action_stats(root)
     best_action = best_root_action_from_stats(root_stats)
 
