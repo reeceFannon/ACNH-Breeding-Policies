@@ -83,7 +83,7 @@ def policy_grad(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.Lo
   x_final = model(x0_, target_idx, eps_present = eps_present)
   target_mass = x_final.index_select(0, target_idx).sum()
 
-  grad_logits = torch.autograd.grad(target_mass, model.logits, retain_graph = False, allow_unused = False)
+  grad_logits = torch.autograd.grad(target_mass, model.logits, retain_graph = False, allow_unused = False)[0]
 
   return {"target_mass": float(target_mass.detach().cpu().item()),
           "logits": model.logits.detach(),
