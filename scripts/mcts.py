@@ -35,13 +35,13 @@ def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20, heur
     if not actions: return float(-max_depth) # dead-end; can't continue
 
     if heuristic:
-      dQ = gradients["grad_Q_by_wave"][t]
-      idx_i = torch.tensor([transition_tensor.genotype_to_idx[a] for a, _ in actions], dtype = torch.long, device = dQ.device)
-      idx_j = torch.tensor([transition_tensor.genotype_to_idx[b] for _, b in actions], dtype = torch.long, device = dQ.device)
-      dQ_ij = dQ[idx_i, idx_j]
-      dQ_ji = dQ[idx_j, idx_i]
-      bias = torch.maximum(dQ_ij, dQ_ji)
-      bias = torch.clamp(bias, min = 0.0)
+      dL = gradients["grad_logits"]
+      idx_i = torch.tensor([transition_tensor.genotype_to_idx[a] for a, _ in actions], dtype = torch.long, device = dL.device)
+      idx_j = torch.tensor([transition_tensor.genotype_to_idx[b] for _, b in actions], dtype = torch.long, device = dL.device)
+      dL_ij = dL[idx_i, idx_j]
+      dL_ji = dL[idx_j, idx_i]
+      bias = torch.maximum(dL_ij, dL_ji)
+      bias = torch.softmax(bias, dim = -1)
       action = random.choices(actions, weights = bias, k = 1)[0]
     else:
       action = random.choice(actions)
@@ -84,7 +84,7 @@ class MCTSNode:
         best = child
     return best
 
-def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), heuristic: bool = False, transition_tensor: TransitionTensor = None, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0) -> MCTSNode:
+def mcts_search(mdp: FlowerMDP, root_state: State, num_waves: int, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), heuristic: bool = False, cloning: bool = False, transition_tensor: TransitionTensor = None, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0) -> MCTSNode:
   """
   Run MCTS from the root_state and return the root node
   with its tree of children filled in.
@@ -93,7 +93,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
   gradients = None
 
   if heuristic:
-    model = BreedingPolicyNet(transition_tensor, max_rollout_depth, init_logits_scale = init_logits_scale)
+    model = BreedingPolicyNet(transition_tensor, num_waves, cloning = cloning, init_logits_scale = init_logits_scale)
     x = torch.zeros(model.N, device = transition_tensor.T.device)
     start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state]
     x[start_genos] = 1.0
@@ -131,7 +131,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, n_simulations: int = 1000, ma
 
   return root
 
-def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0) -> Dict[str, object]:
+def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, num_waves: int, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, cloning: bool = False, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0) -> Dict[str, object]:
   state = root_state
   total_steps = 0
   trajectory: List[Tuple[State, Action]] = []
@@ -154,7 +154,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
 
     # --- MCTS from current state ---
     mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
-    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, transition_tensor, init_logits_scale, optim_steps, lr, log_steps, eps_present)
+    root = mcts_search(mdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, cloning, transition_tensor, init_logits_scale, optim_steps, lr, log_steps, eps_present)
     root_stats = extract_root_action_stats(root)
     best_action = best_root_action_from_stats(root_stats)
 
