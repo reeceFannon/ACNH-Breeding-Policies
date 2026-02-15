@@ -120,7 +120,7 @@ def mcts_search(mdp: FlowerMDP, root_state: State, num_waves: int, n_simulations
       node = child  # next we rollout from child
 
     # 3. SIMULATION (ROLLOUT): from this leaf node
-    reward = random_rollout(mdp, node.state, max_depth = num_waves, heuristic = heuristic, transition_tensor = transition_tensor, gradients = gradients)
+    reward = random_rollout(mdp, node.state, max_depth = max_rollout_depth, heuristic = heuristic, transition_tensor = transition_tensor, gradients = gradients)
 
     # 4. BACKPROPAGATION
     while node is not None:
