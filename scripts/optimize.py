@@ -11,11 +11,12 @@ def masked_row_softmax(logits: torch.Tensor, mask: torch.Tensor, dim: int = -1) 
   return probs
 
 class BreedingPolicyNet(nn.Module):
-  def __init__(self, transition_tensor: TransitionTensor, num_waves: int, *, init_logits_scale: float = 0.01):
+  def __init__(self, transition_tensor: TransitionTensor, num_waves: int, *, cloning: bool = False, init_logits_scale: float = 0.01):
     super().__init__()
     T = transition_tensor.T
     N = int(T.shape[0])
     self.num_waves = num_waves
+    self.cloning = cloning
     self.register_buffer("_N", torch.tensor(N, dtype = torch.long))
     self.register_buffer("T", T)
     self.logits = nn.Parameter(init_logits_scale*torch.randn(N, N)) # Learnable logits
@@ -24,7 +25,7 @@ class BreedingPolicyNet(nn.Module):
   def N(self) -> int:
     return int(self._N.item())
 
-  def forward(self, x0: torch.Tensor, target_idx: torch.LongTensor, *, eps_present: float = 0.0, cloning: bool = False) -> torch.Tensor:
+  def forward(self, x0: torch.Tensor, target_idx: torch.LongTensor, *, eps_present: float = 0.0) -> torch.Tensor:
     """
     x0: [N] expected counts
     eps_present: treat x > eps_present as present for masking
@@ -45,7 +46,7 @@ class BreedingPolicyNet(nn.Module):
 
       # offspring[k] = sum_a x_p1[a] * sum_b Q[a,b] * Ti[a,b,k]
       offspring = torch.einsum("a,ab,abk->k", x, Qi, self.T)    # [N]
-      if cloning:
+      if self.cloning:
         clones = torch.zeros_like(x)
         clones[target_idx] = x[target_idx]
         x = torch.clamp(x + offspring + cloning, min = 0.0)
@@ -54,12 +55,12 @@ class BreedingPolicyNet(nn.Module):
 
     return x
 
-def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.LongTensor, *, steps: int = 2000, lr: float = 1e-2, eps_present: float = 1e-6, clip_grad: float = 1.0, log_steps: int = 50, cloning: bool = False):
+def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.LongTensor, *, steps: int = 2000, lr: float = 1e-2, eps_present: float = 1e-6, clip_grad: float = 1.0, log_steps: int = 50):
   opt = torch.optim.Adam(model.parameters(), lr = lr)
   for step in range(steps):
     opt.zero_grad()
 
-    x_final = model(x0, target_idx, eps_present = eps_present, cloning = cloning)
+    x_final = model(x0, target_idx, eps_present = eps_present)
     target_mass = x_final.index_select(0, target_idx).sum()
     loss = -target_mass
     loss.backward()
@@ -75,11 +76,11 @@ def optimize_policy(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torc
   
   return model
 
-def policy_grad(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.LongTensor, *, eps_present: float = 1e-6, cloning: bool = False) -> Dict[str, Any]:
+def policy_grad(model: BreedingPolicyNet, x0: torch.Tensor, target_idx: torch.LongTensor, *, eps_present: float = 1e-6) -> Dict[str, Any]:
   model.eval()
 
   x0_ = x0.detach() # Ensure x0 requires no grad; we want grads w.r.t. policy only.
-  x_final = model(x0_, target_idx, eps_present = eps_present, cloning = cloning)
+  x_final = model(x0_, target_idx, eps_present = eps_present)
   target_mass = x_final.index_select(0, target_idx).sum()
 
   grad_logits = torch.autograd.grad(target_mass, model.logits, retain_graph = False, allow_unused = False)
