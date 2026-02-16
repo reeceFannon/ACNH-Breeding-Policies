@@ -49,7 +49,7 @@ class BreedingPolicyNet(nn.Module):
       if self.cloning:
         clones = torch.zeros_like(x)
         clones[target_idx] = x[target_idx]
-        x = torch.clamp(x + offspring + cloning, min = 0.0)
+        x = torch.clamp(x + offspring + clones, min = 0.0)
       else:
         x = torch.clamp(x + offspring, min = 0.0)
 
