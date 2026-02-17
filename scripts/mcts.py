@@ -20,7 +20,7 @@ def sample_next_state(mdp: FlowerMDP, state: State, action: Action, heuristic: b
   dist: Dict[State, float] = mdp.next_state_distribution(state, action)
   states = list(dist.keys())
   probs = list(dist.values())
-  return random.choices(states, weights = probs, k = 1)[0]
+  return random.choices(states, weights = probs, k = 1)[0], None
 
 def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20, heuristic: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None) -> float:
   """
