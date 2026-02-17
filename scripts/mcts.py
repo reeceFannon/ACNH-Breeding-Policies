@@ -141,7 +141,7 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
     start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state]
     x[start_genos] = root_counts
     target_idx = []
-    for group in mdp.targets: target_idx.extend([transition_tensor.genotype_to_idx[target] for target in group])
+    for group in targets: target_idx.extend([transition_tensor.genotype_to_idx[target] for target in group])
     target_idx = torch.tensor(target_idx, device = transition_tensor.T.device)
   else:
     transition_tensor = None
