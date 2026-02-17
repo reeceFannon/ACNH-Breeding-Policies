@@ -1,25 +1,28 @@
 import math
 import random
+import torch
 import multiprocessing as mp
 from typing import Iterable, Dict, List, Tuple, Sequence, FrozenSet
-from transitions import FlowerTransitions
+from transitions import FlowerTransitions, TransitionTensor
 from mdp import FlowerMDP, State, Action
 from mcts import (sample_next_state, mcts_search, extract_root_action_stats, best_root_action_from_stats, StepStats)
+from optimize import BreedingPolicyNet, optimize_policy, policy_grad
 
-def _worker_mcts_run(species: str, targets: Sequence[FrozenSet[str]], root_state: State, n_simulations: int, max_rollout_depth: int, c: float = math.sqrt(2.0), seed: int | None = None) -> Dict[Action, Dict[str, float]]:
+def _worker_mcts_run(species: str, targets: Sequence[FrozenSet[str]], root_state: State, n_simulations: int, max_rollout_depth: int, c: float = math.sqrt(2.0), seed: int | None = None, heuristic: bool = False, cloning: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None) -> Dict[Action, Dict[str, float]]:
   """
   Worker function: builds its own MDP instance, runs MCTS,
   and returns root action stats.
   """
   if seed is not None:
     random.seed(seed)
+    torch.manual_seed(seed)
 
   transitions = FlowerTransitions()
   mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
-  root = mcts_search(mdp, root_state = root_state, n_simulations = n_simulations, max_rollout_depth = max_rollout_depth, c = c)
+  root = mcts_search(mdp, root_state = root_state, n_simulations = n_simulations, max_rollout_depth = max_rollout_depth, c = c, heuristic = heuristic, cloning = cloning, transition_tensor = transition_tensor, gradients = gradients)
   return extract_root_action_stats(root)
 
-def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_state: State, total_simulations: int = 1000, max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), seeds: List[int] | None = None) -> tuple[Action | None, Dict[Action, Dict[str, float]]]:
+def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_state: State, total_simulations: int = 1000, max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), seeds: List[int] | None = None, heuristic: bool = False, cloning: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None) -> tuple[Action | None, Dict[Action, Dict[str, float]]]:
   """
   Root-parallel MCTS:
     - splits total_simulations across n_workers,
@@ -35,7 +38,7 @@ def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_sta
   elif len(seeds) < n_workers: raise Exception(f"Not enough seeds. Seeds requires length {n_workers}. You have {len(seeds)}")
   else: seeds = seeds[:n_workers]
 
-  args = [(species, targets, root_state, sims_per_worker, max_rollout_depth, c, None if i is None else i) for i in seeds]
+  args = [(species, targets, root_state, sims_per_worker, max_rollout_depth, c, (None if i is None else i), heuristic, cloning, transition_tensor, gradients) for i in seeds]
   ctx = mp.get_context("spawn")
   with ctx.Pool(processes=n_workers) as pool:
     results = pool.starmap(_worker_mcts_run, args)
@@ -53,7 +56,7 @@ def parallel_mcts_root(species: str, targets: Sequence[FrozenSet[str]], root_sta
   best_action = best_root_action_from_stats(aggregated)
   return best_action, aggregated
 
-def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seeds: List[int] | None = None) -> Dict[str, object]:
+def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_counts: torch.FloatTensor, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, n_workers: int = 4, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seeds: List[int] | None = None, heuristic: bool = False, cloning: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, recalc_heuristic_every: int = 1) -> Dict[str, object]:
   """
   High-level episode driver that uses *parallel* MCTS at each step.
   Loop:
@@ -78,22 +81,40 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
   transitions = FlowerTransitions()
   mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
   success = False
+  
+  if heuristic:
+    from transitions import TransitionTensorBuilder
+    transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
+    x = torch.zeros(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device)
+    start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state]
+    x[start_genos] = root_counts
+    target_idx = []
+    for group in targets: target_idx.extend([transition_tensor.genotype_to_idx[target] for target in group])
+    target_idx = torch.tensor(target_idx, device = transition_tensor.T.device)
+  else:
+    transition_tensor = None
+    gradients = None
+    
   while (not success) and (total_steps < max_episode_steps):
-    if current_max_rollout_depth <= 0:
-      break
+    if current_max_rollout_depth <= 0: break
+
+    if (heuristic) and (total_steps % recalc_heuristic_every == 0):
+      model = BreedingPolicyNet(transition_tensor, num_waves, cloning = cloning, init_logits_scale = init_logits_scale)
+      optimize_policy(model, x, target_idx, steps = optim_steps, lr = lr, log_steps = log_steps)
+      gradients = policy_grad(model, x, target_idx, eps_present = eps_present)
 
     # --- parallel root MCTS from current state ---
     step_seeds = seeds if seeds is not None else [random.randint(1, 2**31 - 1) for i in range(n_workers)]
-    best_action, root_stats = parallel_mcts_root(species = species, targets = targets, root_state = state, total_simulations = current_n_simulations, max_rollout_depth = current_max_rollout_depth, n_workers = n_workers, c = c, seeds = step_seeds)
+    best_action, root_stats = parallel_mcts_root(species = species, targets = targets, root_state = state, total_simulations = current_n_simulations, max_rollout_depth = current_max_rollout_depth, n_workers = n_workers, c = c, seeds = step_seeds, heuristic = heuristic, cloning = cloning, transition_tensor = transition_tensor, gradients = gradients)
 
-    if best_action is None:
-      break  # no legal actions
+    if best_action is None: break  # no legal actions
 
     trajectory.append((state, best_action))
 
     # sample next state in the *main* process
-    next_state = sample_next_state(mdp, state, best_action)
+    next_state, k = sample_next_state(mdp, state, best_action, heuristic = heuristic, transition_tensor = transition_tensor)
     state = next_state
+    x[k] += 1
     total_steps += 1
     print(f"Finished step {total_steps}: Chose action {best_action} with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
 
