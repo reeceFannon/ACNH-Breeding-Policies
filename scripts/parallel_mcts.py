@@ -3,7 +3,7 @@ import random
 import torch
 import multiprocessing as mp
 from typing import Iterable, Dict, List, Tuple, Sequence, FrozenSet
-from transitions import FlowerTransitions, TransitionTensor
+from transitions import FlowerTransitions, TransitionTensorBuilder, TransitionTensor
 from mdp import FlowerMDP, State, Action
 from mcts import (sample_next_state, mcts_search, extract_root_action_stats, best_root_action_from_stats, StepStats)
 from optimize import BreedingPolicyNet, optimize_policy, policy_grad
@@ -81,11 +81,10 @@ def parallel_full_episode(species: str, targets: Sequence[FrozenSet[str]], root_
   transitions = FlowerTransitions()
   mdp = FlowerMDP(species = species, transitions = transitions, targets = targets)
   success = False
+  transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
+  x = torch.zeros(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device)
   
   if heuristic:
-    from transitions import TransitionTensorBuilder
-    transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
-    x = torch.zeros(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device)
     start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state]
     x[start_genos] = root_counts
     target_idx = []
