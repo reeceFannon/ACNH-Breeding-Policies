@@ -3,7 +3,7 @@ import random
 import torch
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
-from transitions import FlowerTransitions, canonical_pair, TransitionTensor
+from transitions import FlowerTransitions, canonical_pair, TransitionTensorBuilder, TransitionTensor
 from mdp import FlowerMDP, State, Action
 from optimize import BreedingPolicyNet, optimize_policy, policy_grad
 
@@ -133,11 +133,10 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: St
   success = False
   episode_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
   random.seed(episode_seed)
+  transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
+  x = torch.zeros(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device)
   
   if heuristic:
-    from transitions import TransitionTensorBuilder
-    transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
-    x = torch.zeros(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device)
     start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state]
     x[start_genos] = root_counts
     target_idx = []
