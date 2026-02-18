@@ -31,7 +31,10 @@ def random_rollout(mdp: FlowerMDP, start_state: State, max_depth: int = 20, heur
   state = start_state
   if heuristic:
     dL = gradients["grad_logits"]
-    dL_max = torch.maximum(dL, dL.T)
+    mu = dL.mean(dim = 1, keepdim = True)
+    sigma = dL.std(dim = 1, keepdim = True)
+    dL_Z = (dL - mu)/sigma
+    dL_max = torch.maximum(dL_Z, dL_Z.T)
     
   for t in range(max_depth):
     if mdp.is_terminal(state): return float(-t) # already reached target
