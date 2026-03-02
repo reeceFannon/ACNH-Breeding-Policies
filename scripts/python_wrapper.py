@@ -1,3 +1,4 @@
+import torch
 from __future__ import annotations
 from typing import Sequence, FrozenSet, List, Dict, Any
 from mdp import State
@@ -25,17 +26,22 @@ def _make_targets(targets) -> List[FrozenSet[str]]:
   for group in targets: result.append(frozenset(str(g) for g in group))
   return result
 
-def run_episode_for_shiny(species: str, targets, root_state, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = 2.0**0.5, min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed = None) -> Dict[str, Any]:
+def _make_counts(root_counts) -> torch.FloatTensor:
+  if root_counts is None: return []
+  return torch.tensor(root_counts, dtype = torch.float32)
+
+def run_episode_for_shiny(species: str, targets, root_state, root_counts, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = 2.0**0.5, min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed = None, heuristic: bool = False, cloning: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, recalc_heuristic_every: int = 1) -> Dict[str, Any]:
   """
-  Wrapper around parallel_full_episode that returns a dict
+  Wrapper around full_episode that returns a dict
   composed only of basic Python types (lists, dicts, numbers, strings)
   so R/reticulate can ingest it easily.
   Parameters are intentionally kept close to parallel_full_episode.
   """
   py_targets = _make_targets(targets)
   py_root_state = _make_state(root_state)
+  py_root_counts = _make_counts(root_counts)
 
-  episode = full_episode(species = species, targets = py_targets, root_state = py_root_state, root_n_simulations = root_n_simulations, max_episode_steps = max_episode_steps, root_max_rollout_depth = root_max_rollout_depth, c = c, min_n_simulations = min_n_simulations, max_simulations_scale_factor = max_simulations_scale_factor, min_depth_floor = min_depth_floor, seed = seed)
+  episode = full_episode(species = species, targets = py_targets, root_state = py_root_state, root_n_simulations = root_n_simulations, max_episode_steps = max_episode_steps, root_max_rollout_depth = root_max_rollout_depth, c = c, min_n_simulations = min_n_simulations, max_simulations_scale_factor = max_simulations_scale_factor, min_depth_floor = min_depth_floor, seed = seed, heuristic = heuristic, cloning = cloning, num_waves = num_waves, init_logits_scale = init_logits_scale, optim_steps = optim_steps, lr = lr, log_steps = log_steps, eps_present = eps_present, recalc_heuristic_every = recalc_heuristic_every)
 
   trajectory = episode["trajectory"]
   final_state: State = episode["final_state"]
