@@ -278,10 +278,11 @@ server = function(input, output, session)
     plan_running(TRUE)
     plan_warning("Running planner…")  # lightweight reassurance
     
+    rootCounts = as.numeric(strsplit(input$rootCounts, "[, ]+")[[1]])
     res = run_episode_for_shiny(species = input$planSpecies,
                                 targets = targets,
                                 root_state = input$rootState,
-                                root_counts = input$rootCounts,
+                                root_counts = rootCounts,
                                 root_n_simulations = input$rootSimulations,
                                 max_episode_steps = input$episodeSteps,
                                 root_max_rollout_depth = input$rootDepth,
@@ -478,3 +479,4 @@ server = function(input, output, session)
     })
 
 }
+
