@@ -402,4 +402,68 @@ server = function(input, output, session)
     tags$div(class = "policy-grid",
              lapply(pol$waves, render_wave))
   })
+  
+  #############################################################################################################
+  ####################################### Simulate Tab ########################################################
+  #############################################################################################################
+  
+  ####################################### Upload Policy #########################################################
+  
+  sim_warning = reactiveVal(NULL)
+  policy_rv_sim = reactiveVal(NULL)
+  sim_results = reactiveVal(tibble(policy_id = character(), steps = list()))
+  
+  observeEvent(input$policyFile_sim, {
+    req(input$policyFile_sim$datapath)
+    pol = readRDS(input$policyFile_sim$datapath)
+    policy_rv_sim(pol)
+  })
+  
+  output$loadStatus_sim = renderUI(
+    {
+      pol = policy_rv_sim()
+      if(is.null(pol)) {return(tags$span(style="opacity:0.8;", "No policy loaded yet."))}
+      tags$span(style="color:#2e7d32; font-weight:600;", "Policy loaded.")
+    })
+  
+  observeEvent(input$simPolicy, {
+    sim_warning(NULL)
+    if(is.null(policy_rv_sim())) {sim_warning("Please upload a policy.")}
+    if(is.null(input$startCount)) {sim_warning("Please enter how many starter pairs to begin the simulation with.")}
+    if(is.null(input$nameSim) || str_equal(input$nameSim, "")) {sim_warning("Please enter a name for this simulation.")}
+    
+    if(!is.null(sim_warning()))
+    {
+      print(sim_warning)
+      return()
+    }
+    
+    pol = policy_rv_sim()
+    sim_warning("starting simulation...")
+    new_row = simulate_policy_n(pol, input$nameSim, input$startCount, input$numSims)
+    
+    old = sim_results()
+    updated = bind_rows(old, new_row)
+    sim_results(updated)
+
+    output$simPlot = renderPlot({plot_simulation_results(sim_results())})
+    output$simTable = renderTable(
+      {
+        df = sim_results()
+        req(df)
+        summarize_simulation_results(sim_results())
+      }, striped = TRUE, bordered = TRUE, spacing = "s")
+    
+    sim_warning("finished")
+  })
+  
+  output$simWarning = renderUI(
+    {
+      msg = sim_warning()
+      if (is.null(msg)) return(NULL)
+      
+      # choose warning vs success based on content (simple heuristic)
+      status = if (grepl("finished", msg, ignore.case = TRUE)) "success" else "danger"
+      box(width = 12, status = status, solidHeader = TRUE, title = "Status", msg)
+    })
 }
