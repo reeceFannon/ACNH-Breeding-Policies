@@ -281,6 +281,7 @@ server = function(input, output, session)
     res = run_episode_for_shiny(species = input$planSpecies,
                                 targets = targets,
                                 root_state = input$rootState,
+                                root_counts = input$rootCounts,
                                 root_n_simulations = input$rootSimulations,
                                 max_episode_steps = input$episodeSteps,
                                 root_max_rollout_depth = input$rootDepth,
@@ -288,7 +289,16 @@ server = function(input, output, session)
                                 min_n_simulations = input$minSimulations,
                                 max_simulations_scale_factor = input$simScaleFactor,
                                 min_depth_floor = input$minDepth,
-                                seed = input$seed)
+                                seed = input$seed,
+                                heuristic = input$heuristic,
+                                cloning = input$cloning,
+                                num_waves = input$numWaves,
+                                init_logits_scale = input$logitsScale,
+                                optim_steps = input$optimSteps,
+                                lr = input$learnRate,
+                                log_steps = input$logSteps,
+                                eps_present = input$epsPresent,
+                                recalc_heuristic_every = input$recalcHeuristic)
     
     plan_result(res)
     plan_warning("Planner finished.")
@@ -466,4 +476,5 @@ server = function(input, output, session)
       status = if (grepl("finished", msg, ignore.case = TRUE)) "success" else "danger"
       box(width = 12, status = status, solidHeader = TRUE, title = "Status", msg)
     })
+
 }
