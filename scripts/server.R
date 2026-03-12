@@ -77,6 +77,42 @@ server = function(input, output, session)
   numWaves = reactiveVal(0)
   policyObject = reactiveValues(waves = list())
   Wave = reactiveVal(list(wave = 1, actions = list()))
+  breed_rv = reactiveValues(n_groups = 0)
+  
+  observeEvent(input$addBreedTargets, {
+    breed_rv$n_groups = breed_rv$n_groups + 1
+  })
+  
+  output$breedTargetGroups = renderUI(
+    {
+      req(input$species)
+      n = breed_rv$n_groups
+      if (n == 0) return(NULL)
+      
+      df = build_filtered_df(input$species)
+      choices = setNames(df$genotype, df$label)
+      tagList(lapply(seq_len(n), 
+                     function(k) 
+                     {
+                       id = paste0("breedTargetGroup_", k)
+                       pickerInput(inputId = id,
+                                   label = paste("Target group", k),
+                                   choices = choices,
+                                   choicesOpt = list(content = df$img_html),
+                                   multiple = TRUE,
+                                   selected = isolate(input[[id]]) %||% character(0),
+                                   options = pickerOptions(liveSearch = TRUE,
+                                                           actionsBox = TRUE,
+                                                           multipleSeparator = ""))
+                     }))
+    })
+  
+  get_breed_targets = function(rv)
+  {
+    if (rv$n_groups <= 0) return(list())
+    targets = lapply(seq_len(rv$n_groups), function(k) {input[[paste0("breedTargetGroup_", k)]]})
+    Filter(function(x) !is.null(x) && length(x) > 0, targets)
+  }
   
   Action = reactive(
   {
@@ -148,29 +184,30 @@ server = function(input, output, session)
       cur$wave = numWaves() + 1
       waves = c(waves, list(cur))
     }
-    list(waves = waves)
+    targets = get_breed_targets(breed_rv)
+    list(waves = waves, targets = targets, species = input$species)
   })
   
-  output$downloadBttn2 = renderUI(
-    {
-      pol = manual_policy()
-      req(pol)
-      
-      if(is.null(pol)) return(NULL)
-      box(width = 12,
-          status = "info",
-          solidHeader = TRUE,
-          actionBttn(inputId = "download2",
-                     label = "Download Policy",
-                     style = "material-flat",
-                     color = "royal",
-                     size = "md",
-                     block = TRUE,
-                     icon = icon("save", lib = "glyphicon")))
-    })
+  # output$downloadBttn2 = renderUI(
+  #   {
+  #     pol = manual_policy()
+  #     req(pol)
+  #     
+  #     if(is.null(pol)) return(NULL)
+  #     box(width = 12,
+  #         status = "info",
+  #         solidHeader = TRUE,
+  #         actionBttn(inputId = "download2",
+  #                    label = "Download Policy",
+  #                    style = "material-flat",
+  #                    color = "royal",
+  #                    size = "md",
+  #                    block = TRUE,
+  #                    icon = icon("save", lib = "glyphicon")))
+  #   })
   
   output$downloadBttn2 = downloadHandler(
-    filename = function() {paste0("acnh_policy_", input$planSpecies, "_", ".rds")},
+    filename = function() {paste0("acnh_policy_", input$species, "_", ".rds")},
     content = function(file) 
     {
       pol = manual_policy()
@@ -278,11 +315,9 @@ server = function(input, output, session)
     plan_running(TRUE)
     plan_warning("Running planner…")  # lightweight reassurance
     
-    rootCounts = as.numeric(strsplit(input$rootCounts, "[, ]+")[[1]])
     res = run_episode_for_shiny(species = input$planSpecies,
                                 targets = targets,
                                 root_state = input$rootState,
-                                root_counts = rootCounts,
                                 root_n_simulations = input$rootSimulations,
                                 max_episode_steps = input$episodeSteps,
                                 root_max_rollout_depth = input$rootDepth,
@@ -290,16 +325,7 @@ server = function(input, output, session)
                                 min_n_simulations = input$minSimulations,
                                 max_simulations_scale_factor = input$simScaleFactor,
                                 min_depth_floor = input$minDepth,
-                                seed = input$seed,
-                                heuristic = input$heuristic,
-                                cloning = input$cloning,
-                                num_waves = input$numWaves,
-                                init_logits_scale = input$logitsScale,
-                                optim_steps = input$optimSteps,
-                                lr = input$learnRate,
-                                log_steps = input$logSteps,
-                                eps_present = input$epsPresent,
-                                recalc_heuristic_every = input$recalcHeuristic)
+                                seed = input$seed)
     
     plan_result(res)
     plan_warning("Planner finished.")
@@ -477,6 +503,4 @@ server = function(input, output, session)
       status = if (grepl("finished", msg, ignore.case = TRUE)) "success" else "danger"
       box(width = 12, status = status, solidHeader = TRUE, title = "Status", msg)
     })
-
 }
-

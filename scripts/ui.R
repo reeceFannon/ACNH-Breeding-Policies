@@ -61,6 +61,14 @@ body = dashboardBody(tags$head(tags$style(HTML(".picker-row{display: flex; align
                                                           title = "Edit Policy",
                                                           status = "warning",
                                                           solidHeader = TRUE,
+                                                          uiOutput("breedTargetGroups"),
+                                                          actionBttn(inputId = "addBreedTargets",
+                                                                     label = "Add Target Group",
+                                                                     style = "material-flat",
+                                                                     color = "royal",
+                                                                     size = "md",
+                                                                     block = TRUE,
+                                                                     icon = icon("plus", lib = "glyphicon")),
                                                           uiOutput("checkbox"),
                                                           fluidRow(column(width = 6,
                                                                           style = "padding-right: 0px",
@@ -202,10 +210,6 @@ body = dashboardBody(tags$head(tags$style(HTML(".picker-row{display: flex; align
                                                                                title = "Heuristic Search Settings",
                                                                                status = "warning",
                                                                                solidHeader = TRUE,
-                                                                               textInputIcon(inputId = "rootCounts",
-                                                                                             label = "How many starters do you have?",
-                                                                                             placeholder = "1,3,2,...,1"
-                                                                                             icon = icon("tree-conifer", lib = "glyphicon")),
                                                                                prettySwitch(inputId = "cloning",
                                                                                             label = "Allow Cloning?",
                                                                                             value = FALSE,
@@ -329,4 +333,3 @@ body = dashboardBody(tags$head(tags$style(HTML(".picker-row{display: flex; align
                                                               tableOutput("simTable"))))))))
 
 ui = dashboardPage(header = header, sidebar = sidebar, body = body, skin = "red")
-

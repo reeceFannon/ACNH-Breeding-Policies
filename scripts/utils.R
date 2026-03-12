@@ -10,6 +10,14 @@ seed_map = list(rose = c("rryyWwss" = "white", "rrYYWWss" = "yellow", "RRyyWWSs"
                 mum = c("rryyWw" = "white", "rrYYWW" = "yellow", "RRyyWW" = "red"),
                 windflower = c("rrooWw" = "white", "rrOOWW" = "orange", "RRooWW" = "red"))
 
+json_to_ls = function(from, to)
+{
+  ls = fromJSON(from, simplifyVector = FALSE)
+  ls = build_policy_plan(ls$species, ls)
+  ls = add_keep_flags(ls, ls$targets)
+  saveRDS(ls, to)
+}
+
 genome_split = function(genotype)
 {
   alleles = str_split(genotype, "")[[1]]
@@ -150,6 +158,7 @@ build_policy_plan = function(species, ls)
   lookup = build_filtered_df(species) %>% select(-flower)
   
   targets = ls$targets
+  species = ls$species
   waves_out = lapply(ls$waves, function(w)
   {
     wave_idx = w$wave
@@ -169,7 +178,7 @@ build_policy_plan = function(species, ls)
     })
     list(wave = wave_idx, actions = actions_out)
   })
-  list(waves = waves_out, targets = targets)
+  list(waves = waves_out, targets = targets, species = species)
 }
 
 wave_parent_genos = function(wave_actions)
@@ -181,27 +190,52 @@ wave_parent_genos = function(wave_actions)
 add_keep_flags = function(plan, targets)
 {
   waves = plan$waves
-  n = length(waves)
-  if (n <= 1) return(plan)
-  
   targets = unique(unlist(targets, use.names = FALSE))
-  parents_by_wave = lapply(waves, function(w) wave_parent_genos(w$actions))
+  seeds = names(seed_map[[plan$species]])
   
-  future_parents = vector("list", n)
-  future_parents[[n]] = character(0)
-  if(n >= 2)
+  lastCheck = FALSE
+  while(!lastCheck)
   {
-    for(i in (n - 1):1) {future_parents[[i]] = unique(c(future_parents[[i + 1]], parents_by_wave[[i + 1]]))}
-  }
-  
-  for (i in seq_len(n)) 
-  {
-    keeps = unique(c(future_parents[[i]], targets))
-    waves[[i]]$actions = lapply(waves[[i]]$actions, function(action_tbl) 
+    old_n_actions = sum(vapply(waves, function(w) length(w$actions), integer(1)))
+    n = length(waves)
+    
+    parents_by_wave = lapply(waves, function(w) wave_parent_genos(w$actions))
+    
+    future_parents = vector("list", n)
+    future_parents[[n]] = character(0)
+    if(n >= 2)
     {
-      action_tbl %>%
-        mutate(transitions = map(transitions, function(tr) {tr %>% mutate(keep = offspring %in% keeps)}))
-    })
+      for(i in (n - 1):1) {future_parents[[i]] = unique(c(future_parents[[i + 1]], parents_by_wave[[i + 1]]))}
+    }
+    
+    for (i in c(seq_len(n), 999)) 
+    {
+      if(i == 999)
+      {
+        i = n
+        keeps = unique(c(parents_by_wave[[i]], targets))
+      }
+      else keeps = unique(c(future_parents[[i]], targets))
+      keeps = setdiff(keeps, seeds) # never keep seed offspring
+      waves[[i]]$actions = lapply(waves[[i]]$actions, function(action_tbl) 
+      {
+        action_tbl %>%
+          mutate(transitions = map(transitions, function(tr) {tr %>% mutate(keep = offspring %in% keeps)}))
+      })
+      
+      keep_action = vapply(waves[[i]]$actions,
+                           function(action_tbl)
+                           {
+                             tr = action_tbl$transitions[[1]]
+                             any(tr$keep)
+                           },
+                           logical(1))
+      
+      waves[[i]]$actions = waves[[i]]$actions[keep_action]
+    }
+    
+    new_n_actions = sum(vapply(waves, function(w) length(w$actions), integer(1)))
+    lastCheck = (new_n_actions == old_n_actions)
   }
   
   plan$waves = waves
@@ -261,7 +295,6 @@ render_wave = function(wave_obj)
 canonical_pair = function(p1, p2) paste(sort(c(p1, p2)), collapse = " | ")
 get_targets = function(targets) lapply(targets, function(set_i) unique(as.character(unlist(set_i, recursive = TRUE, use.names = FALSE))))
 concat = function(x, y) mapply(canonical_pair, x, y, USE.NAMES = FALSE)
-viability = function(s, actions) s %in% actions
 
 ls_to_df = function(ls)
 {
@@ -284,17 +317,12 @@ ls_to_df = function(ls)
   df %>% arrange(wave)
 }
 
-pad = function(offspring, queue)
+pad = function(x, y)
 {
-  ol = length(offspring)
-  ql = length(queue)
-  maxl = max(c(ol, ql))
-  if (maxl == 0L) return(list(offspring = character(0), queue = character(0))) # avoid -1 in rep()
-  if(maxl == ol) queue = c(queue, rep("", maxl - ql)) # pad to equal lengths
-  else offspring = c(offspring, rep("", maxl - ol))
-  
-  offspring = c(rep("", maxl - 1), offspring, rep("", maxl - 1))
-  list(offspring = offspring, queue = queue)
+  yl = length(y)
+  if(yl == 0L) return(list(offspring = character(0), queue = character(0))) # avoid -1 in rep()
+  x = c(rep("", yl - 1), x, rep("", yl - 1))
+  list(x = x, y = y)
 }
 
 sample_offspring = function(df, counts, targets, hits = NULL)
@@ -310,44 +338,63 @@ sample_offspring = function(df, counts, targets, hits = NULL)
     offspring = c(offspring, draws[keeps])
   }
   
-  for (j in seq_along(targets)) {hits[j] = hits[j] || any(offspring %in% targets[j])}
+  for (j in seq_along(targets)) {hits[j] = hits[j] || any(offspring %in% targets[[j]])}
   success = all(hits)
   list(offspring = offspring, hits = hits, success = success)
 }
 
-concat_convolve_count = function(df, offspring, queue, counts)
+concat_convolve_count = function(df, species, offspring, queue, counts)
 {
   if (length(offspring) == 0L) return(list(queue = queue, counts = counts))
   if (length(queue) == 0L) return(list(queue = offspring, counts = counts))
   
   parent_actions = unique(df$parents)
-  padded = pad(offspring, queue)
-  off = padded$offspring
-  q = padded$queue
-  ql = length(q)
-  for(i in 1:ql)
+  off = offspring
+  seeds = names(seed_map[[species]])
+  for(seed in seeds)
   {
-    idx = i:(i+ql-1)
-    cats = concat(off[idx], q)
-    viable = mapply(viability, cats, MoreArgs = list(actions = parent_actions), USE.NAMES = FALSE)
+    if(length(off) == 0) break
+    cats = concat(off, rep(seed, length(off)))
+    viable = cats %in% parent_actions
+    matches = cats[viable]
+    counts[matches] = counts[matches] + 1
+    off = off[!viable]
+  }
+  
+  if (length(off) == 0L) return(list(queue = queue, counts = counts))
+  
+  offspring_bigger = (length(offspring) >= length(queue))
+  if(offspring_bigger) padded = pad(offspring, queue)
+  else padded = pad(queue, offspring)
+  x = padded$x # x is padded
+  y = padded$y # y is shorter
+  xl = length(x)
+  yl = length(y)
+  for(i in 1:(xl-yl+1))
+  {
+    idx = i:(i+yl-1)
+    cats = concat(x[idx], y)
+    viable = cats %in% parent_actions
     
     matches = cats[viable]
     counts[matches] = counts[matches] + 1
     
-    q[viable] = ""
-    off[idx[viable]] = ""
+    y[viable] = ""
+    x[idx[viable]] = ""
   }
   
-  off = off[!str_equal(off, "")]
-  q = q[!str_equal(q, "")]
-  q = c(q, off)
-  return(list(queue = q, counts = counts))
+  x = x[!str_equal(x, "")]
+  y = y[!str_equal(y, "")]
+  
+  if(offspring_bigger) q = c(y, x)
+  else q = c(x, y)
+  list(queue = q, counts = counts)
 }
 
-simulate_policy = function(policy, targets, start_count)
+simulate_policy = function(policy, species, targets, start_count)
 {
   counts = set_names(rep(0, nrow(policy)), policy$parents)
-  starters = policy %>% filter(wave == 1) %>% select(parents) %>% pull(parents)
+  starters = policy %>% filter(wave == min(wave)) %>% select(parents) %>% pull(parents)
   counts[starters] = start_count
   queue = character(0)
   hits = NULL
@@ -359,7 +406,7 @@ simulate_policy = function(policy, targets, start_count)
     offspring = res$offspring
     hits = res$hits
     success = res$success
-    res = concat_convolve_count(policy, offspring, queue, counts)
+    res = concat_convolve_count(policy, species, offspring, queue, counts)
     queue = res$queue
     counts = res$counts
     steps = steps + 1
@@ -370,12 +417,13 @@ simulate_policy = function(policy, targets, start_count)
 
 simulate_policy_n = function(policy, name, start_count, n)
 {
+  species = policy$species
   targets = get_targets(policy$targets)
   policy_df = ls_to_df(policy)
   results = numeric(n)
   for(sim in 1:n)
   {
-    steps = simulate_policy(policy_df, targets, start_count)
+    steps = simulate_policy(policy_df, species, targets, start_count)
     results[sim] = steps
     print(paste0("Finished simulation ", sim, " in ", steps, " days"))
   }
@@ -385,17 +433,17 @@ simulate_policy_n = function(policy, name, start_count, n)
 
 plot_simulation_results = function(results)
 {
-  df_long = results %>% unnest_longer(steps, values_to = "steps")
-  
-  ggplot(df_long) +
-    geom_density(aes(x = steps, fill = policy), alpha = .5, color = "black", lwd = .5) +
-    labs(x = "Days", y = NULL, title = "Days to Hit Target") +
-    theme_bw() +
-    theme(axis.text.y  = element_blank(),
-          axis.line.y  = element_blank(),
-          axis.ticks.y = element_blank(),
-          axis.title.x = element_text(face = "bold"),
-          plot.title   = element_text(hjust = .5, face = "bold"))
+  results %>% 
+    unnest_longer(steps, values_to = "steps") %>%
+    ggplot() +
+      geom_density(aes(x = steps, fill = policy), alpha = .5, color = "black", lwd = .5) +
+      labs(x = "Days", y = NULL, title = "Days to Hit Target") +
+      theme_bw() +
+      theme(axis.text.y  = element_blank(),
+            axis.line.y  = element_blank(),
+            axis.ticks.y = element_blank(),
+            axis.title.x = element_text(face = "bold"),
+            plot.title   = element_text(hjust = .5, face = "bold"))
 }
 
 summarize_simulation_results = function(results)
@@ -412,5 +460,6 @@ summarize_simulation_results = function(results)
     mutate(mean = round(mean, 2),
            std  = round(std, 2),
            ci   = paste0("(", round(ci_lo, 2), ", ", round(ci_hi, 2), ")")) %>%
-    select(policy, n, mean, std, ci)
+    select(policy, n, mean, std, ci) %>%
+    arrange(mean)
 }
