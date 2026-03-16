@@ -79,28 +79,39 @@ class FlowerGenetics:
     return result
 
   def phenotypes_for_genotypes(self, species: str, genotypes: List[str]) -> List[str]:
-      """
-      Given a species and a list of genotypes,
-      return a list of frozensets of phenotypes:
-          [ Q(phenotype_1), Q(phenotype_2), ... ]
-      where each Q(...) is the phenotype for that genotype.
-      Order matches the order of `genotypes`.
-      """
-      species = species.lower()
-  
-      result: List[FrozenSet[str]] = []
-      for g in genotypes:
-        subset = self._df.filter((pl.col("flower") == species) & (pl.col("genotype") == g))
-        phenos = tuple(subset["phenotype"].to_list())
-        result.append(phenos)
-  
-      return result
+    """
+    Given a species and a list of genotypes,
+    return the corresponding phenotype for each genotype:
+        [Q(genotype_1), Q(genotype_2), ...]
+    where each Q(...) is the phenotype for that genotype.
+    Order matches the order of `genotypes`.
+    """
+    species = species.lower()
+
+    subset = (self._df.filter(pl.col("flower") == species).select(["genotype", "phenotype"]).unique())
+    geno_to_pheno = dict(zip(subset["genotype"].to_list(), subset["phenotype"].to_list()))
+    phenos = [geno_to_pheno[g] for g in genotypes]
+
+    return phenos
+
+def posterior_given_phenotype(dist: torch.Tensor, sampled_idx: int, transition_tensor: TransitionTensor) -> torch.Tensor:
+  N = len(transition_tensor.idx_to_genotype)
+  if dist.shape[0] != N: raise ValueError(f"`dist` has length {dist.shape[0]}, but transition tensor expects length {N}")
+
+  phenotype = transition_tensor.idx_to_phenotype[sampled_idx]
+  idxs = transition_tensor.phenotype_to_idx[phenotype]
+  posterior = torch.zeros_like(dist)
+  posterior[idxs] = dist[idxs]
+
+  return posterior/posterior.sum()
 
 @dataclass(frozen = True)
 class TransitionTensor:
-    T: torch.Tensor                      # [N, N, N] = [parent1, parent2, offspring]
-    genotype_to_idx: Dict[str, int]      # genotype -> index (0..N-1)
-    idx_to_genotype: List[str]           # index -> genotype
+  T: torch.Tensor                        # [N, N, N] = [parent1, parent2, offspring]
+  genotype_to_idx: Dict[str, int]        # genotype -> index (0..N-1)
+  idx_to_genotype: List[str]             # index -> genotype
+  idx_to_phenotype: List[str]            # index -> phenotype
+  phenotype_to_idx: Dict[str, List[int]] # phenotype -> list of genotype indices
 
 class TransitionTensorBuilder:
   def __init__(self, paths: FlowerDataPaths | None = None):
@@ -122,6 +133,13 @@ class TransitionTensorBuilder:
     N = len(genotypes)
     genotype_to_idx = {g: i for i, g in enumerate(genotypes)}
     idx_to_genotype = genotypes
+
+    genetics = FlowerGenetics(self.paths)
+    idx_to_phenotype = genetics.phenotypes_for_genotypes(species, idx_to_genotype)
+
+    phenotype_to_idx: Dict[str, List[int]] = {}
+    for i, phenotype in enumerate(idx_to_phenotype):
+      phenotype_to_idx.setdefault(phenotype, []).append(i)
 
     # Map genotype strings to integer indices using replace_strict
     # (replace_strict will error if a value isn't in the mapping)
@@ -154,4 +172,4 @@ class TransitionTensorBuilder:
     if not torch.allclose(T, T.transpose(0, 1), atol = 1e-6, rtol = 0):
       raise ValueError("T is not symmetric in parent1/parent2 after fill.")
 
-    return TransitionTensor(T = T, genotype_to_idx = genotype_to_idx, idx_to_genotype = idx_to_genotype)
+    return TransitionTensor(T = T, genotype_to_idx = genotype_to_idx, idx_to_genotype = idx_to_genotype, idx_to_phenotype = idx_to_phenotype, phenotype_to_idx = phenotype_to_idx)
