@@ -47,23 +47,17 @@ class QuantumFlower:
 class QuantumFlowerMDP:
   species: str
   transition_tensor: TransitionTensor
-  target_idxs: Sequence[FrozenSet[int]]
+  targets: Sequence[FrozenSet[str]]
   action_cache: Dict[QuantumState, List[QuantumAction]] = field(default_factory = dict, init = False, repr = False)
 
-  def is_terminal(self, state: QuantumState) -> bool:
+  def is_terminal(self, state: BeliefState) -> bool:
     """
-    Terminal if for every target genotype group G, at least one flower in state
-    assigns positive probability to some genotype in G.
-
-    This mirrors the original genotype-known terminal condition, but under ambiguity.
+    Terminal if, for every target phenotype group, the state contains at least one
+    flower whose observed phenotype belongs to that group.
     """
-    for group in self.target_idxs:
-      found = False
-      for flower in state:
-        if not set(flower.genotype_idxs).isdisjoint(group):
-          found = True
-          break
-      if not found:
+    phenotypes = {flower.phenotype for flower in state}
+    for group in self.targets:
+      if phenotypes.isdisjoint(group):
         return False
     return True
 
@@ -108,3 +102,13 @@ class QuantumFlowerMDP:
 
     parent_labels = (flower1.phenotype, flower2.phenotype)
     return QuantumFlower.from_distribution(posterior, phenotype = phenotype, parents = canonical_pair(*parent_labels))
+
+def sample_next_state(self, state: BeliefState, action: BeliefAction, *) -> tuple[BeliefState, BeliefFlower]:
+    """
+    Sample one offspring flower and add it to the state.
+    Returns (next_state, sampled_child).
+    """
+    flower1, flower2 = action
+    child = self.sample_offspring_flower(flower1, flower2)
+    next_state = frozenset(set(state) | {child})
+    return next_state, child
