@@ -28,7 +28,6 @@ class FlowerMDP:
   def available_actions(self, state: State) -> List[Action]:
     """
     All unordered parent pairs (A,B) with A,B in state.
-    You can later prune / prioritize this if needed.
     """
     if state in self.action_cache:
       return self.action_cache[state]
