@@ -103,10 +103,9 @@ class QuantumFlowerMDP:
     parent_labels = (flower1.phenotype, flower2.phenotype)
     return QuantumFlower.from_distribution(posterior, phenotype = phenotype, parents = canonical_pair(*parent_labels))
 
-def sample_next_state(self, state: BeliefState, action: BeliefAction, *) -> tuple[BeliefState, BeliefFlower]:
+def sample_next_state(self, state: QuantumState, action: QuantumAction, *) -> tuple[QuantumState, QuantumFlower]:
     """
     Sample one offspring flower and add it to the state.
-    Returns (next_state, sampled_child).
     """
     flower1, flower2 = action
     child = self.sample_offspring_flower(flower1, flower2)
