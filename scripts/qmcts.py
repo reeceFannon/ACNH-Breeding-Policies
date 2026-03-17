@@ -1,0 +1,234 @@
+import math
+import random
+import torch
+from dataclasses import dataclass, field
+from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
+from transitions import FlowerTransitions, canonical_pair, TransitionTensorBuilder, TransitionTensor
+from qmdp import QuantumFlowerMDP, QuantumState, QuantumAction, QuantumFlower
+from optimize import BreedingPolicyNet, optimize_policy, policy_grad
+
+def sample_next_state(qmdp: QuantumFlowerMDP, state: QuantumState, action: QuantumAction):
+  return qmdp.sample_next_state(state, action)
+
+def resolve_latent_genotype(flower: QuantumFlower, transition_tensor: TransitionTensor, latent_cache: Dict[QuantumFlower, int]) -> int:
+  if flower not in latent_cache:
+    dist = flower.to_dense(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device, dtype = transition_tensor.T.dtype)
+    latent_cache[flower] = int(torch.multinomial(dist, 1).item())
+  return latent_cache[flower]
+
+def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth: int = 20, heuristic: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None) -> float:
+  """
+  Random policy rollout from start_state.
+  Returns reward = -steps to terminal (more negative if slower).
+  """
+  latent_genotype_cache: Dict[QuantumFlower, int]
+  prev_state = frozenset()
+  state = start_state
+  if heuristic:
+    dL = gradients["grad_logits"]
+    mu = dL.mean(dim = 1, keepdim = True)
+    sigma = dL.std(dim = 1, keepdim = True)
+    dL_Z = (dL - mu)/sigma
+    dL_max = torch.maximum(dL_Z, dL_Z.T)
+    
+  for t in range(max_depth):
+    if qmdp.is_terminal(state): return float(-t) # already reached target
+
+    actions = qmdp.available_actions(state)
+    if not actions: return float(-max_depth) # dead-end; can't continue
+
+    if heuristic:
+      if state - prev_state: # if the set difference exists
+        D1 = [a.to_dense() for a, _ in actions]
+        D2 = [b.to_dense() for _, b in actions]
+        scores = torch.tensor([torch.dot(d2, dL_max@d1) for d1, d2 in zip(D1, D2)])
+        bias = torch.softmax(scores)
+      action = random.choices(actions, weights = bias, k = 1)[0]
+    else:
+      action = random.choice(actions)
+
+    prev_state = state
+    state, offspring = sample_next_state(qmdp, state, action, heuristic = heuristic, transition_tensor = transition_tensor)
+
+  return float(-max_depth) # didn't reach terminal within horizon
+
+@dataclass
+class MCTSNode:
+  state: QuantumState
+  parent: Optional["MCTSNode"] = None
+  action_from_parent: Optional[QuantumAction] = None
+  
+  children: Dict[QuantumAction, "MCTSNode"] = field(default_factory = dict)
+  untried_actions: List[QuantumAction] = field(default_factory = list)
+
+  visits: int = 0
+  total_reward: float = 0.0
+  total_sq_reward: float = 0.0
+
+  def is_fully_expanded(self) -> bool:
+    return len(self.untried_actions) == 0
+
+  def best_child(self, c: float = math.sqrt(2.0)) -> "MCTSNode":
+    """
+    UCT selection: argmax over children of (Q / N + c * sqrt(log Np / Nc)).
+    """
+    best_score = -float("inf")
+    best = None
+    for child in self.children.values():
+      if child.visits == 0:
+        uct = float("inf")
+      else:
+        exploit = child.total_reward / child.visits
+        explore = c*math.sqrt(math.log(self.visits)/child.visits)
+        uct = exploit + explore
+      if uct > best_score:
+        best_score = uct
+        best = child
+    return best
+
+def mcts_search(qmdp: FlowerMDP, root_state: QuantumState, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), heuristic: bool = False, cloning: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0) -> MCTSNode:
+  """
+  Run MCTS from the root_state and return the root node
+  with its tree of children filled in.
+  """
+  root = MCTSNode(state = root_state, parent = None, action_from_parent = None, untried_actions = qmdp.available_actions(root_state))
+
+  for _ in range(n_simulations):
+    node = root
+
+    # 1. SELECTION: descend tree using UCT
+    while node.is_fully_expanded() and node.children:
+      node = node.best_child(c)
+
+    # 2. EXPANSION: expand one untried action (if any and not terminal)
+    if not qmdp.is_terminal(node.state) and node.untried_actions:
+      action = node.untried_actions.pop()
+      next_state, _ = sample_next_state(qmdp, node.state, action, heuristic = heuristic, transition_tensor = transition_tensor)
+
+      child = MCTSNode(state = next_state, parent = node, action_from_parent = action, untried_actions = qmdp.available_actions(next_state))
+      node.children[action] = child
+      node = child  # next we rollout from child
+
+    # 3. SIMULATION (ROLLOUT): from this leaf node
+    reward = random_rollout(qmdp, node.state, max_depth = max_rollout_depth, heuristic = heuristic, transition_tensor = transition_tensor, gradients = gradients)
+
+    # 4. BACKPROPAGATION
+    while node is not None:
+      node.visits += 1
+      node.total_reward += reward
+      node.total_sq_reward += reward**2
+      node = node.parent
+
+  return root
+
+def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: State, root_counts: torch.FloatTensor, root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, cloning: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, recalc_heuristic_every: int = 1) -> Dict[str, object]:
+  state = root_state
+  total_steps = 0
+  trajectory: List[Tuple[State, Action]] = []
+  current_max_rollout_depth = root_max_rollout_depth
+  current_n_simulations = root_n_simulations
+  step_stats = StepStats()
+  transitions = FlowerTransitions()
+  success = False
+  episode_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
+  random.seed(episode_seed)
+  transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
+  x = torch.zeros(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device)
+  
+  if heuristic:
+    start_genos = [transition_tensor.genotype_to_idx[g] for g in root_state]
+    x[start_genos] = root_counts
+    target_idx = []
+    for group in targets: target_idx.extend([transition_tensor.genotype_to_idx[target] for target in group])
+    target_idx = torch.tensor(target_idx, device = transition_tensor.T.device)
+  else:
+    transition_tensor = None
+    gradients = None
+    
+  while (not success) and (total_steps < max_episode_steps):
+    if current_max_rollout_depth <= 0: break
+
+    if (heuristic) and (total_steps % recalc_heuristic_every == 0):
+      model = BreedingPolicyNet(transition_tensor, num_waves, cloning = cloning, init_logits_scale = init_logits_scale)
+      optimize_policy(model, x, target_idx, steps = optim_steps, lr = lr, log_steps = log_steps)
+      gradients = policy_grad(model, x, target_idx, eps_present = eps_present)
+
+    # --- MCTS from current state ---
+    qmdp = QuantumFlowerMDP(species = species, transitions = transitions, targets = targets)
+    root = mcts_search(qmdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, cloning, transition_tensor, gradients, init_logits_scale, optim_steps, lr, log_steps, eps_present)
+    root_stats = extract_root_action_stats(root)
+    best_action = best_root_action_from_stats(root_stats)
+
+    if best_action is None: break  # no legal actions
+
+    trajectory.append((state, best_action))
+
+    # sample next state in the *main* process
+    next_state, child = sample_next_state(qmdp, state, best_action)
+    state = next_state
+    x += child.to_dense()
+    total_steps += 1
+    print(f"Finished step {total_steps}: Chose action {best_action} and produced offspring ({transition_tensor.idx_to_genotype[k]}) with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
+
+    # update best action stats and rollout depth
+    best_stats = root_stats[best_action]
+    step_stats.update(best_stats["visits"], -best_stats["total_reward"], best_stats["total_sq_reward"])
+    mu, sigma = step_stats.mean, math.sqrt(max(step_stats.variance, 0.0))
+    current_max_rollout_depth = int(max(min(mu + 3*sigma, current_max_rollout_depth), min_depth_floor))
+
+    # update the number of simulations
+    visits = [stats["visits"] for stats in root_stats.values()]
+    if len(visits) == 0:
+      entropy_ratio = 0.0
+    else:
+      p_visit = [v/sum(visits) for v in visits]
+      entropy = -sum(p_v*math.log(p_v) for p_v in p_visit)
+      entropy_ratio = entropy/math.log(len(visits)) # the upper bound on entropy is ln(len(X)), where every x in X is identically equal (no uncertainty)
+    scale_factor = max(entropy_ratio, max_simulations_scale_factor)
+    current_n_simulations = int(max(scale_factor*current_n_simulations, min_n_simulations)) # update simulations in accordance with uncertainty/precision about actions
+    
+    success = qmdp.is_terminal(state)
+
+  return {"trajectory": trajectory, "final_state": state, "total_steps": total_steps, "success": success}
+
+
+@dataclass
+class StepStats:
+  n: int = 0
+  sum_steps: float = 0.0
+  sum_sq_steps: float = 0.0
+
+  def update(self, n: int, sum_steps: float, sum_sq_steps: float) -> None:
+    self.n = n
+    self.sum_steps = sum_steps
+    self.sum_sq_steps = sum_sq_steps
+
+  @property
+  def mean(self) -> Optional[float]:
+    if self.n == 0:
+      return None
+    return self.sum_steps/self.n
+
+  @property
+  def variance(self) -> Optional[float]:
+    if self.n == 0:
+      return None
+    m = self.mean
+    return (self.sum_sq_steps/self.n) - m**2 # E(X^2) - (E(X))^2
+
+def extract_root_action_stats(root: MCTSNode) -> Dict[Action, Dict[str, float]]:
+  """
+  Summarize stats for each root action:
+  returns {action: {"visits": v, "total_reward": r}}.
+  """
+  stats: Dict[Action, Dict[str, float]] = {}
+  for action, child in root.children.items():
+    stats[action] = {"visits": child.visits,
+                      "total_reward": child.total_reward,
+                      "total_sq_reward": child.total_sq_reward}
+  return stats
+
+def best_root_action_from_stats(stats: Dict[Action, Dict[str, float]]) -> Optional[Action]:
+  if not stats:
+    return None
+  return max(stats.items(), key=lambda kv: kv[1]["visits"])[0]
