@@ -1,11 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import FrozenSet, Tuple, Dict, Iterable, List, Sequence, Optional
-import random
+from typing import FrozenSet, Tuple, Dict, List, Sequence, Optional
 from itertools import combinations_with_replacement
 import torch
 
-from transitions import (FlowerTransitions, TransitionTensor, canonical_pair, posterior_given_phenotype)
+from transitions import (TransitionTensor, canonical_pair, posterior_given_phenotype)
 
 QuantumState = FrozenSet["QuantumFlower"]
 QuantumAction = Tuple["QuantumFlower", "QuantumFlower"]
@@ -50,7 +49,7 @@ class QuantumFlowerMDP:
   targets: Sequence[FrozenSet[str]]
   action_cache: Dict[QuantumState, List[QuantumAction]] = field(default_factory = dict, init = False, repr = False)
 
-  def is_terminal(self, state: BeliefState) -> bool:
+  def is_terminal(self, state: QuantumState) -> bool:
     """
     Terminal if, for every target phenotype group, the state contains at least one
     flower whose observed phenotype belongs to that group.
@@ -103,7 +102,7 @@ class QuantumFlowerMDP:
     parent_labels = (flower1.phenotype, flower2.phenotype)
     return QuantumFlower.from_distribution(posterior, phenotype = phenotype, parents = canonical_pair(*parent_labels))
 
-def sample_next_state(self, state: QuantumState, action: QuantumAction, *) -> tuple[QuantumState, QuantumFlower]:
+  def sample_next_state(self, state: QuantumState, action: QuantumAction) -> tuple[QuantumState, QuantumFlower]:
     """
     Sample one offspring flower and add it to the state.
     """
