@@ -3,14 +3,21 @@ from dataclasses import dataclass, field
 from typing import FrozenSet, Tuple, Dict, List, Sequence, Optional
 from itertools import combinations_with_replacement
 import torch
+import hashlib
 
 from transitions import (TransitionTensor, canonical_pair, posterior_given_phenotype)
 
 QuantumState = FrozenSet["QuantumFlower"]
 QuantumAction = Tuple["QuantumFlower", "QuantumFlower"]
 
+def create_flower_hash(phenotype: str, parents: Optional[Tuple[str, str]], *, n_hex: int = 16) -> str:
+  parent1, parent2 = canonical_pair(*parents)
+  payload = f"{parent1} | {parent2} | {phenotype}".encode("utf-8")
+  return hashlib.blake2b(payload, digest_size = n_hex // 2).hexdigest()
+
 @dataclass(frozen = True)
 class QuantumFlower:
+  hash: str
   phenotype: str
   genotype_idxs: Tuple[int, ...]
   genotype_probs: Tuple[float, ...]
@@ -40,24 +47,23 @@ class QuantumFlower:
     genotype_idxs = tuple(int(i) for i in idxs.tolist())
     genotype_probs = tuple(round(float(p), decimals) for p in probs.tolist())
 
-    return QuantumFlower(phenotype = phenotype, genotype_idxs = genotype_idxs, genotype_probs = genotype_probs, parents = parents)
+    hash = create_flower_hash(phenotype, parents)
+
+    return QuantumFlower(hash = hash, phenotype = phenotype, genotype_idxs = genotype_idxs, genotype_probs = genotype_probs, parents = parents)
 
 @dataclass
 class QuantumFlowerMDP:
   species: str
   transition_tensor: TransitionTensor
-  targets: Sequence[FrozenSet[str]]
+  targets: List[str]
   action_cache: Dict[QuantumState, List[QuantumAction]] = field(default_factory = dict, init = False, repr = False)
 
   def is_terminal(self, state: QuantumState) -> bool:
     """
-    Terminal if, for every target phenotype group, the state contains at least one
-    flower whose observed phenotype belongs to that group.
+    Terminal if we obtained every desired phenotype
     """
     phenotypes = {flower.phenotype for flower in state}
-    for group in self.targets:
-      if phenotypes.isdisjoint(group):
-        return False
+    if phenotypes == set(targets): return False
     return True
 
   def available_actions(self, state: QuantumState) -> List[QuantumAction]:
@@ -74,7 +80,7 @@ class QuantumFlowerMDP:
   def breed_distribution(self, flower1: QuantumFlower, flower2: QuantumFlower) -> torch.Tensor:
     """
     Compute offspring genotype distribution from two ambiguous parents:
-        offspring[k] = sum_{a,b} d1[a] d2[b] T[a,b,k]
+      offspring[k] = sum_{a,b} d1[a] d2[b] T[a,b,k]
     Returns a dense probability vector of length N.
     """
     T = self.transition_tensor.T
@@ -99,7 +105,7 @@ class QuantumFlowerMDP:
     phenotype = self.transition_tensor.idx_to_phenotype[idx]
     posterior = posterior_given_phenotype(offspring_dist, idx, self.transition_tensor)
 
-    parent_labels = (flower1.phenotype, flower2.phenotype)
+    parent_labels = (flower1.hash, flower2.hash)
     return QuantumFlower.from_distribution(posterior, phenotype = phenotype, parents = canonical_pair(*parent_labels))
 
   def sample_next_state(self, state: QuantumState, action: QuantumAction) -> tuple[QuantumState, QuantumFlower]:
