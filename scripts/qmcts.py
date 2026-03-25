@@ -3,20 +3,28 @@ import random
 import torch
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
-from transitions import FlowerTransitions, canonical_pair, TransitionTensorBuilder, TransitionTensor
-from qmdp import QuantumFlowerMDP, QuantumState, QuantumAction, QuantumFlower
+from transitions import FlowerTransitions, TransitionTensorBuilder, TransitionTensor, canonical_pair, posterior_given_phenotype
+from qmdp import QuantumFlowerMDP, QuantumState, QuantumAction, QuantumFlower, create_serial_number
 from optimize import BreedingPolicyNet, optimize_policy, policy_grad
 
-def resolve_latent_genotype(flower: QuantumFlower, transition_tensor: TransitionTensor, latent_cache: Dict[QuantumFlower, int]) -> int:
-  if flower not in latent_cache:
-    dist = flower.to_dense(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device, dtype = transition_tensor.T.dtype)
-    latent_cache[flower] = int(torch.multinomial(dist, 1).item())
-  return latent_cache[flower]
+def initialize_start(genotypes: List[str], transition_tensor: TransitionTensor) -> QuantumState:
+  p = len(genotypes)
+  idxs = [transition_tensor.genotype_to_idx[genotype] for genotype in genotypes]
+  phenotypes = [transition_tensor.idx_to_phenotype[idx] for idx in idxs]
+  hashes = [create_flower_hash(phenotype, ("0"*16, "0"*16)) for phenotype in phenotypes]
+  flowers = [QuantumFlower(hashes[i], phenotype[i], (idxs[i],), (1.0,), ("0"*16, "0"*16)) for i in range(p)]
+  return frozenset(set(flowers))
 
-def sample_child(action: QuantumAction, transition_tensor: TransitionTensor, latent_cache: Dict[QuantumFlower, int]) -> tuple[QuantumFlower, int]:
+def resolve_latent_genotype(flower: QuantumFlower, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> int:
+  if flower not in cache:
+    dist = flower.to_dense(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device, dtype = transition_tensor.T.dtype)
+    cache[flower] = int(torch.multinomial(dist, 1).item())
+  return cache[flower]
+
+def sample_child(action: QuantumAction, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> tuple[QuantumFlower, int]:
   parent1, parent2 = action
-  i = resolve_latent_genotype(parent1, transition_tensor, latent_cache)
-  j = resolve_latent_genotype(parent2, transition_tensor, latent_cache)
+  i = resolve_latent_genotype(parent1, transition_tensor, cache)
+  j = resolve_latent_genotype(parent2, transition_tensor, cache)
 
   T = transition_tensor.T
   offspring_dist = T[i, j, :]
@@ -24,13 +32,14 @@ def sample_child(action: QuantumAction, transition_tensor: TransitionTensor, lat
   child_phenotype = transition_tensor.idx_to_phenotype[child_idx]
   
   posterior = posterior_given_phenotype(offspring_dist, child_idx, transition_tensor)
-  child = QuantumFlower.from_distribution(posterior, phenotype = child_phenotype, parents = action)
+  parent_labels = (parent1.hash, parent2.hash)
+  child = QuantumFlower.from_distribution(posterior, phenotype = child_phenotype, parents = canonical_pair(*parent_labels))
 
   return child, child_idx
 
-def sample_next_state(state: QuantumState, action: QuantumAction, latent_cache: Dict[QuantumFlower, int]) -> tuple[QuantumState, QuantumFlower]:
-  child, child_idx = sample_child(action, transition_tensor, latent_cache)
-  latent_cache[child] = child_idx
+def sample_next_state(state: QuantumState, action: QuantumAction, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> QuantumState:
+  child, child_idx = sample_child(action, transition_tensor, cache)
+  cache[child] = child_idx
   next_state = frozenset(set(state) | {child})
   return next_state
 
@@ -67,7 +76,7 @@ def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth:
       action = random.choice(actions)
 
     prev_state = state
-    state = sample_next_state(state, action)
+    state = sample_next_state(state, action, transition_tensor, latent_genotype_cache)
 
   return float(-max_depth) # didn't reach terminal within horizon
 
@@ -140,7 +149,7 @@ def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations:
 
   return root
 
-def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: QuantumState, root_counts: List[float], root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, cloning: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, recalc_heuristic_every: int = 1) -> Dict[str, object]:
+def full_episode(species: str, targets: List[str], root_state: QuantumState, root_counts: List[float], root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, cloning: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, recalc_heuristic_every: int = 1) -> Dict[str, object]:
   state = root_state
   total_steps = 0
   trajectory: List[Tuple[QuantumState, QuantumAction]] = []
@@ -152,16 +161,14 @@ def full_episode(species: str, targets: Sequence[FrozenSet[str]], root_state: Qu
   random.seed(episode_seed)
   transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
   x = torch.zeros(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device)
+
+  N = len(transition_tensor.idx_to_genotype)
+  for flower, count in zip(root_state, root_counts): x += count*flower.to_dense(N, device = x.device, dtype = x.dtype)
+  target_idx = []
+  for pheno in targets: target_idx.extend(transition_tensor.phenotype_to_idx[pheno])
+  target_idx = torch.tensor(target_idx, device = transition_tensor.T.device)
   
-  if heuristic:
-    N = len(transition_tensor.idx_to_genotype)
-    for flower, count in zip(root_state, root_counts): x += count*flower.to_dense(N, device = x.device, dtype = x.dtype)
-    target_idx = []
-    for pheno in targets: target_idx.extend(transition_tensor.phenotype_to_idx[pheno])
-    target_idx = torch.tensor(target_idx, device = transition_tensor.T.device)
-  else:
-    transition_tensor = None
-    gradients = None
+  if not heuristic: gradients = None
     
   while (not success) and (total_steps < max_episode_steps):
     if current_max_rollout_depth <= 0: break
@@ -246,7 +253,7 @@ def extract_root_action_stats(root: MCTSNode) -> Dict[QuantumAction, Dict[str, f
                       "total_sq_reward": child.total_sq_reward}
   return stats
 
-def best_root_action_from_stats(stats: Dict[QuantumAction, Dict[str, float]]) -> Optional[Action]:
+def best_root_action_from_stats(stats: Dict[QuantumAction, Dict[str, float]]) -> Optional[QuantumAction]:
   if not stats:
     return None
   return max(stats.items(), key=lambda kv: kv[1]["visits"])[0]
