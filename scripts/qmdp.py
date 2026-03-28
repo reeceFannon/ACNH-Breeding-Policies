@@ -63,8 +63,8 @@ class QuantumFlowerMDP:
     Terminal if we obtained every desired phenotype
     """
     phenotypes = {flower.phenotype for flower in state}
-    if phenotypes == set(targets): return False
-    return True
+    if set(self.targets).issubset(phenotypes): return True
+    return False
 
   def available_actions(self, state: QuantumState) -> List[QuantumAction]:
     """
@@ -72,7 +72,7 @@ class QuantumFlowerMDP:
     """
     if state in self.action_cache: return self.action_cache[state]
 
-    flowers = sorted(state, key = lambda f: (f.phenotype, f.genotype_idxs, f.genotype_probs, f.parents or ("", "")))
+    flowers = sorted(state, key = lambda f: (f.hash))
     actions = list(combinations_with_replacement(flowers, 2))
     self.action_cache[state] = actions
     return actions
