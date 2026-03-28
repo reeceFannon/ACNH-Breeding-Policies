@@ -4,7 +4,7 @@ import torch
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
 from transitions import FlowerTransitions, TransitionTensorBuilder, TransitionTensor, canonical_pair, posterior_given_phenotype
-from qmdp import QuantumFlowerMDP, QuantumState, QuantumAction, QuantumFlower, create_serial_number
+from qmdp import QuantumFlowerMDP, QuantumState, QuantumAction, QuantumFlower, create_flower_hash
 from optimize import BreedingPolicyNet, optimize_policy, policy_grad
 
 def initialize_start(genotypes: List[str], transition_tensor: TransitionTensor) -> QuantumState:
@@ -12,7 +12,7 @@ def initialize_start(genotypes: List[str], transition_tensor: TransitionTensor) 
   idxs = [transition_tensor.genotype_to_idx[genotype] for genotype in genotypes]
   phenotypes = [transition_tensor.idx_to_phenotype[idx] for idx in idxs]
   hashes = [create_flower_hash(phenotype, ("0"*16, "0"*16)) for phenotype in phenotypes]
-  flowers = [QuantumFlower(hashes[i], phenotype[i], (idxs[i],), (1.0,), ("0"*16, "0"*16)) for i in range(p)]
+  flowers = [QuantumFlower(hashes[i], phenotypes[i], (idxs[i],), (1.0,), ("0"*16, "0"*16)) for i in range(p)]
   return frozenset(set(flowers))
 
 def resolve_latent_genotype(flower: QuantumFlower, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> int:
