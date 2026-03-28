@@ -186,14 +186,15 @@ def full_episode(species: str, targets: List[str], root_state: List[str], root_c
 
     if best_action is None: break  # no legal actions
 
-    trajectory.append((state, best_action))
-
     # sample next state in the *main* process
     next_state, child = qmdp.sample_next_state(state, best_action)
     state = next_state
     x += child.to_dense(N, device = x.device, dtype = x.dtype)
     total_steps += 1
-    print(f"Finished step {total_steps}: Chose action {best_action} and produced offspring ({child.phenotype}) with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
+    parent1, parent2 = best_action
+    print(f"Finished step {total_steps}: Chose action ({parent1.phenotype}, {parent2.phenotype}) and produced offspring ({child.phenotype}) with {current_n_simulations} rollouts at a depth of {current_max_rollout_depth}")
+
+    trajectory.append((state, best_action, child))
 
     # update best action stats and rollout depth
     best_stats = root_stats[best_action]
