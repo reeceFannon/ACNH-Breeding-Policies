@@ -149,8 +149,7 @@ def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations:
 
   return root
 
-def full_episode(species: str, targets: List[str], root_state: QuantumState, root_counts: List[float], root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, cloning: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, recalc_heuristic_every: int = 1) -> Dict[str, object]:
-  state = root_state
+def full_episode(species: str, targets: List[str], root_state: List[str], root_counts: List[float], root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, cloning: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, recalc_heuristic_every: int = 1) -> Dict[str, object]:
   total_steps = 0
   trajectory: List[Tuple[QuantumState, QuantumAction]] = []
   current_max_rollout_depth = root_max_rollout_depth
@@ -161,9 +160,10 @@ def full_episode(species: str, targets: List[str], root_state: QuantumState, roo
   random.seed(episode_seed)
   transition_tensor = TransitionTensorBuilder().build_transition_tensor(species)
   x = torch.zeros(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device)
+  state = initialize_start(root_state, transition_tensor)
 
   N = len(transition_tensor.idx_to_genotype)
-  for flower, count in zip(root_state, root_counts): x += count*flower.to_dense(N, device = x.device, dtype = x.dtype)
+  for flower, count in zip(state, root_counts): x += count*flower.to_dense(N, device = x.device, dtype = x.dtype)
   target_idx = []
   for pheno in targets: target_idx.extend(transition_tensor.phenotype_to_idx[pheno])
   target_idx = torch.tensor(target_idx, device = transition_tensor.T.device)
