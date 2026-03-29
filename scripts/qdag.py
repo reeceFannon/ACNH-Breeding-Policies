@@ -97,9 +97,13 @@ def create_label(species: str, flower: QuantumFlower) -> str:
   return f"{species} | {flower.phenotype} | {flower.hash}"
 
 def create_img_html(species: str, flower: QuantumFlower) -> str:
-  return f"<img src='/imgs/{species}_{flower.phenotype}.png' class='picker-img'>"
+  html = f"<span class='picker-row'>
+            <img src='/imgs/{"seed" if flower.isSeed else species}_{flower.phenotype}.png' class='picker-img'>
+            <span class='picker-text'>{create_label(species, flower)}</span>
+          </span>"
+  return html
 
-def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFlower]], transition_tensor: TransitionTensor) -> Policy:
+def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFlower]], transition_tensor: TransitionTensor) -> dict:
   """
   Build an initial quantum policy object with waves and actions.
 
@@ -159,7 +163,7 @@ def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, Quantum
 
   return {"species": species, "waves": waves_out}
 
-def add_keep_flags(policy: Policy, targets: List[str]) -> Policy:
+def add_keep_flags(policy: Policy, targets: List[str]) -> dict:
   """
   Mark offspring rows as keep/discard based on whether they are used in future actions
   or match a target phenotype. Remove actions whose offspring are all discard.
