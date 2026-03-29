@@ -1,16 +1,15 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Set, Iterable
 import networkx as nx
 from qmdp import QuantumState, QuantumAction, QuantumFlower, QuantumFlowerMDP, create_flower_hash
-from transitions import TransitionTensor
+from transitions import TransitionTensorBuilder, TransitionTensor
 
 @dataclass
 class QuantumFlowerDAG:
   graph: nx.DiGraph
-  origin_step: Dict[str, int]                  # flower_hash -> step index (-1 for initial)
-  produced_by: Dict[str, QuantumAction | None] # flower_hash -> action that created it
-  flowers: Dict[str, QuantumFlower]            # flower_hash -> flower object
+  origin_step: Dict[str, int]              # flower_hash -> step index (-1 for initial)
+  parents: Dict[str, QuantumAction | None] # flower_hash -> action that created it
 
 @dataclass
 class QuantumActionSchedule:
@@ -53,7 +52,7 @@ def build_hash_dag(trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFl
       G.add_edge(parent1.hash, childHash)
       G.add_edge(parent2.hash, childHash)
 
-    return QuantumFlowerDAG(graph = G, origin_step = origin_step, produced_by = parents)
+    return QuantumFlowerDAG(graph = G, origin_step = origin_step, parents = parents)
 
 def build_action_dag(trajectory: List[Tuple[QuantumState, QuantumAction, Offspring]], origin_step: Dict[str, int], initial_state: QuantumState | None = None) -> nx.DiGraph:
   n = len(trajectory)
@@ -99,8 +98,6 @@ def create_label(species: str, flower: QuantumFlower) -> str:
 
 def create_img_html(species: str, flower: QuantumFlower) -> str:
   return f"<img src='/imgs/{species}_{flower.phenotype}.png' class='picker-img'>"
-
-Policy = Dict[]  
 
 def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFlower]], transition_tensor: TransitionTensor) -> Policy:
   """
@@ -212,3 +209,35 @@ def add_keep_flags(policy: Policy, targets: List[str]) -> Policy:
   for new_idx, wave in enumerate(policy["waves"]): wave["wave"] = new_idx
 
   return policy
+
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
+@dataclass
+class QuantumPolicy:
+  species: str
+  targets: List[str]
+  trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFlower]]
+  final_state: QuantumState
+  total_steps: int
+  success: bool
+  transition_tensor: TransitionTensor
+  waves: list = field(default_factory = list)
+
+  @classmethod
+  def from_episode(cls, episode: dict, transition_tensor: TransitionTensor = None):
+    if transition_tensor is None:
+      transition_tensor_builder = TransitionTensorBuilder()
+      transition_tensor = transition_tensor_builder.build_transition_tensor(episode["species"])
+    return cls(species = episode["species"], targets = episode["targets"], trajectory = episode["trajectory"], final_state = episode["final_state"], total_steps = episode["total_steps"], success = episode["success"], transition_tensor = transition_tensor)
+
+  def build_policy_plan(self):
+    policy = build_policy_plan(species = self.species, trajectory = self.trajectory, transition_tensor = self.transition_tensor)
+    self.waves = policy["waves"]
+    return policy
+
+  def add_keep_flags(self):
+    policy = {"species": self.species, "waves": self.waves}
+    policy = add_keep_flags(policy, targets = self.targets)
+    self.waves = policy["waves"]
+    return policy
