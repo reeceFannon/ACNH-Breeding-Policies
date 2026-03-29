@@ -215,7 +215,7 @@ def full_episode(species: str, targets: List[str], root_state: List[str], root_c
     
     success = qmdp.is_terminal(state)
 
-  return {"trajectory": trajectory, "final_state": state, "total_steps": total_steps, "success": success}
+  return {"species": species, "targets": targets, "trajectory": trajectory, "final_state": state, "total_steps": total_steps, "success": success}
 
 
 @dataclass
