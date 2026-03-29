@@ -3,8 +3,8 @@ import random
 import torch
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
-from transitions import FlowerTransitions, TransitionTensorBuilder, TransitionTensor, canonical_pair, posterior_given_phenotype
-from qmdp import QuantumFlowerMDP, QuantumState, QuantumAction, QuantumFlower, create_flower_hash
+from transitions import FlowerTransitions, TransitionTensorBuilder, TransitionTensor, posterior_given_phenotype, canonical_pair
+from qmdp import QuantumFlowerMDP, QuantumState, QuantumAction, QuantumFlower, create_flower_hash, quantum_pair
 from optimize import BreedingPolicyNet, optimize_policy, policy_grad
 
 def initialize_start(genotypes: List[str], transition_tensor: TransitionTensor) -> QuantumState:
@@ -12,7 +12,7 @@ def initialize_start(genotypes: List[str], transition_tensor: TransitionTensor) 
   idxs = [transition_tensor.genotype_to_idx[genotype] for genotype in genotypes]
   phenotypes = [transition_tensor.idx_to_phenotype[idx] for idx in idxs]
   hashes = [create_flower_hash(phenotype, ("0"*16, "0"*16)) for phenotype in phenotypes]
-  flowers = [QuantumFlower(hashes[i], phenotypes[i], (idxs[i],), (1.0,), ("0"*16, "0"*16)) for i in range(p)]
+  flowers = [QuantumFlower(hashes[i], phenotypes[i], True, (idxs[i],), (1.0,), ("0"*16, "0"*16)) for i in range(p)]
   return frozenset(set(flowers))
 
 def resolve_latent_genotype(flower: QuantumFlower, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> int:
@@ -22,7 +22,7 @@ def resolve_latent_genotype(flower: QuantumFlower, transition_tensor: Transition
   return cache[flower]
 
 def sample_child(action: QuantumAction, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> tuple[QuantumFlower, int]:
-  parent1, parent2 = action
+  parent1, parent2 = quantum_pair(action)
   i = resolve_latent_genotype(parent1, transition_tensor, cache)
   j = resolve_latent_genotype(parent2, transition_tensor, cache)
 
@@ -32,8 +32,8 @@ def sample_child(action: QuantumAction, transition_tensor: TransitionTensor, cac
   child_phenotype = transition_tensor.idx_to_phenotype[child_idx]
   
   posterior = posterior_given_phenotype(offspring_dist, child_idx, transition_tensor)
-  parent_labels = (parent1.hash, parent2.hash)
-  child = QuantumFlower.from_distribution(posterior, phenotype = child_phenotype, parents = canonical_pair(*parent_labels))
+  parent_labels = canonical_pair(parent1.hash, parent2.hash)
+  child = QuantumFlower.from_distribution(posterior, phenotype = child_phenotype, parents = parent_labels)
 
   return child, child_idx
 

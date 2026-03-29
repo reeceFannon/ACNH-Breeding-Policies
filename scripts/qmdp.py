@@ -5,13 +5,16 @@ from itertools import combinations_with_replacement
 import torch
 import hashlib
 
-from transitions import (TransitionTensor, canonical_pair, posterior_given_phenotype)
+from transitions import (TransitionTensor, posterior_given_phenotype, canonical_pair)
 
 QuantumState = FrozenSet["QuantumFlower"]
 QuantumAction = Tuple["QuantumFlower", "QuantumFlower"]
 
+def quantum_pair(action: QuantumAction) -> QuantumAction:
+  return tuple(sorted(action, key = lambda f: (f.hash)), reverse = True)
+
 def create_flower_hash(phenotype: str, parents: Optional[Tuple[str, str]], *, n_hex: int = 16) -> str:
-  parent1, parent2 = canonical_pair(*parents)
+  parent1, parent2 = quantum_pair(parents)
   payload = f"{parent1} | {parent2} | {phenotype}".encode("utf-8")
   return hashlib.blake2b(payload, digest_size = n_hex // 2).hexdigest()
 
@@ -19,6 +22,7 @@ def create_flower_hash(phenotype: str, parents: Optional[Tuple[str, str]], *, n_
 class QuantumFlower:
   hash: str
   phenotype: str
+  isSeed: bool
   genotype_idxs: Tuple[int, ...]
   genotype_probs: Tuple[float, ...]
   parents: Optional[Tuple[str, str]] = None
@@ -49,7 +53,7 @@ class QuantumFlower:
 
     hash = create_flower_hash(phenotype, parents)
 
-    return QuantumFlower(hash = hash, phenotype = phenotype, genotype_idxs = genotype_idxs, genotype_probs = genotype_probs, parents = parents)
+    return QuantumFlower(hash = hash, phenotype = phenotype, isSeed = False, genotype_idxs = genotype_idxs, genotype_probs = genotype_probs, parents = parents)
 
 @dataclass
 class QuantumFlowerMDP:
@@ -105,14 +109,14 @@ class QuantumFlowerMDP:
     phenotype = self.transition_tensor.idx_to_phenotype[idx]
     posterior = posterior_given_phenotype(offspring_dist, idx, self.transition_tensor)
 
-    parent_labels = (flower1.hash, flower2.hash)
-    return QuantumFlower.from_distribution(posterior, phenotype = phenotype, parents = canonical_pair(*parent_labels))
+    parent_labels = canonical_pair(flower1.hash, flower2.hash)
+    return QuantumFlower.from_distribution(posterior, phenotype = phenotype, parents = parent_labels)
 
   def sample_next_state(self, state: QuantumState, action: QuantumAction) -> tuple[QuantumState, QuantumFlower]:
     """
     Sample one offspring flower and add it to the state.
     """
-    flower1, flower2 = action
+    flower1, flower2 = quantum_pair(action)
     child = self.sample_offspring_flower(flower1, flower2)
     next_state = frozenset(set(state) | {child})
     return next_state, child

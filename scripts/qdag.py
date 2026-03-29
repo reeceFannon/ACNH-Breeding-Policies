@@ -2,8 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Set, Iterable
 import networkx as nx
-from qmdp import QuantumState, QuantumAction, QuantumFlower, QuantumFlowerMDP, create_flower_hash
-from transitions import TransitionTensorBuilder, TransitionTensor
+from qmdp import QuantumState, QuantumAction, QuantumFlower, QuantumFlowerMDP, create_flower_hash, quantum_pair
+from transitions import TransitionTensorBuilder, TransitionTensor, canonical_pair
 
 @dataclass
 class QuantumFlowerDAG:
@@ -36,7 +36,7 @@ def build_hash_dag(trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFl
     T = len(actions)
     for t in range(T): # Track new genotypes at each step
       action, child = actions[t], children[t]
-      parent1, parent2 = action
+      parent1, parent2 = quantum_pair(action)
       origin_step[child.hash] = t
       parents[child.hash] = action
 
@@ -46,7 +46,7 @@ def build_hash_dag(trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFl
 
     for childHash, parents in parents.items():
       if parents is None: continue
-      parent1, parent2 = parents
+      parent1, parent2 = quantum_pair(parents)
       for parent in (parent1, parent2): 
         if parent not in G: G.add_node(parent.hash) # Ensure parents exist as nodes even if they never appeared in a state
       G.add_edge(parent1.hash, childHash)
@@ -65,7 +65,7 @@ def build_action_dag(trajectory: List[Tuple[QuantumState, QuantumAction, Offspri
 
   # Add dependencies based on parent origins
   for j, (state, action, child) in enumerate(trajectory):
-    parent1, parent2 = action
+    parent1, parent2 = quantum_pair(action)
     for parent in (parent1, parent2):
       if parent in initial_state: continue # If parent genotype was available from the start, no dependency
       src = origin_step.get(parent.hash, None)
@@ -97,10 +97,10 @@ def create_label(species: str, flower: QuantumFlower) -> str:
   return f"{species} | {flower.phenotype} | {flower.hash}"
 
 def create_img_html(species: str, flower: QuantumFlower) -> str:
-  html = f"<span class='picker-row'>
-            <img src='/imgs/{"seed" if flower.isSeed else species}_{flower.phenotype}.png' class='picker-img'>
-            <span class='picker-text'>{create_label(species, flower)}</span>
-          </span>"
+  html = f"""<span class='picker-row'>
+  <img src='/imgs/{"seed" if flower.isSeed else species}_{flower.phenotype}.png' class='picker-img'>
+  <span class='picker-text'>{create_label(species, flower)}</span>
+  </span>"""
   return html
 
 def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFlower]], transition_tensor: TransitionTensor) -> dict:
@@ -124,7 +124,7 @@ def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, Quantum
     for action_idx in action_idxs:
       state, action, child = trajectory[action_idx]
       
-      parent1, parent2 = action
+      parent1, parent2 = quantum_pair(action)
       parent1_info = {"parent1_hash": parent1.hash,
                       "parent1_phenotype": parent1.phenotype,
                       "parent1_label": create_label(species, parent1),
