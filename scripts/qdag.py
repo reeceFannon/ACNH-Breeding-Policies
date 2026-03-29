@@ -48,7 +48,8 @@ def build_hash_dag(trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFl
     for childHash, parents in parents.items():
       if parents is None: continue
       parent1, parent2 = parents
-      for parent in (parent1, parent2): if parent not in G: G.add_node(parent.hash) # Ensure parents exist as nodes even if they never appeared in a state
+      for parent in (parent1, parent2): 
+        if parent not in G: G.add_node(parent.hash) # Ensure parents exist as nodes even if they never appeared in a state
       G.add_edge(parent1.hash, childHash)
       G.add_edge(parent2.hash, childHash)
 
