@@ -103,7 +103,7 @@ def create_img_html(species: str, flower: QuantumFlower) -> str:
   </span>"""
   return html
 
-def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFlower]], transition_tensor: TransitionTensor) -> dict:
+def build_policy_plan(species: str, targets: List[str], trajectory: List[Tuple[QuantumState, QuantumAction, QuantumFlower]], transition_tensor: TransitionTensor) -> dict:
   """
   Build an initial quantum policy object with waves and actions.
 
@@ -117,7 +117,7 @@ def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, Quantum
 
   geno_dag = build_hash_dag(trajectory, final_state = trajectory[-1][0] | {trajectory[-1][2]})
   action_sched = build_action_schedule(trajectory, geno_dag)
-  qmdp = QuantumFlowerMDP(species = species, transition_tensor = transition_tensor, targets = [])
+  qmdp = QuantumFlowerMDP(species = species, transition_tensor = transition_tensor, targets = targets)
   waves_out = []
   for wave_idx, action_idxs in sorted(action_sched.actions_by_level.items()):
     actions_out = []
@@ -143,7 +143,7 @@ def build_policy_plan(species: str, trajectory: List[Tuple[QuantumState, Quantum
         prob = float(offspring_dist[idxs].sum().item())
         if prob <= 0: continue
 
-        child_hash = create_flower_hash(phenotype, action)
+        child_hash = create_flower_hash(phenotype, (parent1.hash, parent2.hash))
 
         offspring_rows.append({"prob": prob,
                                "phenotype": phenotype,
@@ -236,7 +236,7 @@ class QuantumPolicy:
     return cls(species = episode["species"], targets = episode["targets"], trajectory = episode["trajectory"], final_state = episode["final_state"], total_steps = episode["total_steps"], success = episode["success"], transition_tensor = transition_tensor)
 
   def build_policy_plan(self):
-    policy = build_policy_plan(species = self.species, trajectory = self.trajectory, transition_tensor = self.transition_tensor)
+    policy = build_policy_plan(species = self.species, targets = self.targets, trajectory = self.trajectory, transition_tensor = self.transition_tensor)
     self.waves = policy["waves"]
     return policy
 

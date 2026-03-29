@@ -14,7 +14,7 @@ def quantum_pair(action: QuantumAction) -> QuantumAction:
   return tuple(sorted(action, key = lambda f: (f.hash)), reverse = True)
 
 def create_flower_hash(phenotype: str, parents: Optional[Tuple[str, str]], *, n_hex: int = 16) -> str:
-  parent1, parent2 = quantum_pair(parents)
+  parent1, parent2 = canonical_pair(parents)
   payload = f"{parent1} | {parent2} | {phenotype}".encode("utf-8")
   return hashlib.blake2b(payload, digest_size = n_hex // 2).hexdigest()
 
