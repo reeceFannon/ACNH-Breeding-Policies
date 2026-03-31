@@ -43,7 +43,13 @@ def sample_next_state(state: QuantumState, action: QuantumAction, transition_ten
   next_state = frozenset(set(state) | {child})
   return next_state
 
-def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth: int = 20, heuristic: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None) -> float:
+def action_heuristic_score(action: QuantumAction, gradients: torch.FloatTensor, N: int) -> float:
+  parent1, parent2 = quantum_pair(action)
+  d1 = parent1.to_dense(N, device = gradients.device, dtype = gradients.dtype)
+  d2 = parent2.to_dense(N, device = gradients.device, dtype = gradients.dtype)
+  return float(torch.dot(d2, gradients@d1).item())
+
+def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth: int = 20, heuristic: bool = False, transition_tensor: TransitionTensor = None, gradients: torch.FloatTensor = None) -> float:
   """
   Random policy rollout from start_state.
   Returns reward = -steps to terminal (more negative if slower).
@@ -52,12 +58,6 @@ def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth:
   prev_state = frozenset()
   state = start_state
   N = len(transition_tensor.idx_to_genotype)
-  if heuristic:
-    dL = gradients["grad_logits"]
-    mu = dL.mean(dim = 1, keepdim = True)
-    sigma = dL.std(dim = 1, keepdim = True)
-    dL_Z = (dL - mu)/sigma
-    dL_max = torch.maximum(dL_Z, dL_Z.T)
     
   for t in range(max_depth):
     if qmdp.is_terminal(state): return float(-t) # already reached target
@@ -67,9 +67,9 @@ def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth:
 
     if heuristic:
       if state - prev_state: # if the set difference exists
-        D1 = [a.to_dense(N, device = dL_max.device, dtype = dL_max.dtype) for a, _ in actions]
-        D2 = [b.to_dense(N, device = dL_max.device, dtype = dL_max.dtype) for _, b in actions]
-        scores = torch.tensor([torch.dot(d2, dL_max@d1) for d1, d2 in zip(D1, D2)])
+        D1 = [a.to_dense(N, device = gradients.device, dtype = gradients.dtype) for a, _ in actions]
+        D2 = [b.to_dense(N, device = gradients.device, dtype = gradients.dtype) for _, b in actions]
+        scores = torch.tensor([torch.dot(d2, gradients@d1) for d1, d2 in zip(D1, D2)])
         bias = torch.softmax(scores, dim = -1)
       action = random.choices(actions, weights = bias, k = 1)[0]
     else:
@@ -93,8 +93,21 @@ class MCTSNode:
   total_reward: float = 0.0
   total_sq_reward: float = 0.0
 
+  action_score_cache: Optional[Dict[QuantumAction, float]] = None
+
   def is_fully_expanded(self) -> bool:
     return len(self.untried_actions) == 0
+
+  def widening_limit(self, c_pw: float, alpha_pw: float) -> int:
+    return max(1, int(c_pw*(self.visits**alpha_pw)))
+
+  def can_expand(self, c_pw: float, alpha_pw: float) -> bool:
+    return (len(self.untried_actions) > 0 and len(self.children) < self.widening_limit(c_pw, alpha_pw))
+
+  def update_action_score_cache(self, gradients: Optional[torch.Tensor], N: int) -> None:
+    if self.action_score_cache is not None and self.sorted_untried_actions is not None: return
+    self.action_score_cache = {action: action_heuristic_score(action, dL_max, N) for action in self.untried_actions}
+    self.untried_actions = sorted(self.untried_actions, key=lambda a: self.action_score_cache[a], reverse=True)
 
   def best_child(self, c: float = math.sqrt(2.0)) -> "MCTSNode":
     """
@@ -114,31 +127,45 @@ class MCTSNode:
         best = child
     return best
 
-def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), heuristic: bool = False, cloning: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0) -> MCTSNode:
+def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), heuristic: bool = False, cloning: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, c_pw: float = 1.0, a_pw: float = 0.5) -> MCTSNode:
   """
   Run MCTS from the root_state and return the root node
   with its tree of children filled in.
   """
   root = MCTSNode(state = root_state, parent = None, action_from_parent = None, untried_actions = qmdp.available_actions(root_state))
 
+  dl_max = None
+  N = len(transition_tensor.idx_to_genotype)
+  if heuristic:
+    dL = gradients["grad_logits"]
+    mu = dL.mean(dim = 1, keepdim = True)
+    sigma = dL.std(dim = 1, keepdim = True)
+    dL_Z = (dL - mu)/sigma
+    dL_max = torch.maximum(dL_Z, dL_Z.T)
+
   for _ in range(n_simulations):
     node = root
 
     # 1. SELECTION: descend tree using UCT
-    while node.is_fully_expanded() and node.children:
-      node = node.best_child(c)
+    while not qmdp.is_terminal(node.state):
+      if node.can_expand(c_pw, alpha_pw): break
+      if node.children: node = node.best_child(c)
+      else: break
 
     # 2. EXPANSION: expand one untried action (if any and not terminal)
-    if not qmdp.is_terminal(node.state) and node.untried_actions:
-      action = node.untried_actions.pop()
+    if not qmdp.is_terminal(node.state) and node.can_expand(c_pw, alpha_pw):
+      node.update_action_score_cache(dL_max, N)
+      action = node.untried_actions[0]
+      node.untried_actions.remove(action)
+
       next_state, _ = qmdp.sample_next_state(node.state, action)
 
       child = MCTSNode(state = next_state, parent = node, action_from_parent = action, untried_actions = qmdp.available_actions(next_state))
       node.children[action] = child
-      node = child  # next we rollout from child
+      node = child
 
     # 3. SIMULATION (ROLLOUT): from this leaf node
-    reward = random_rollout(qmdp, node.state, max_depth = max_rollout_depth, heuristic = heuristic, transition_tensor = transition_tensor, gradients = gradients)
+    reward = random_rollout(qmdp, node.state, max_depth = max_rollout_depth, heuristic = heuristic, transition_tensor = transition_tensor, gradients = dL_max)
 
     # 4. BACKPROPAGATION
     while node is not None:

@@ -93,13 +93,16 @@ def build_action_schedule(trajectory: List[Tuple[QuantumState, QuantumAction, Of
   action_graph = build_action_dag(trajectory = trajectory, origin_step = geno_dag.origin_step, initial_state = initial_state)
   return compute_action_schedule(action_graph)
 
-def create_label(species: str, flower: QuantumFlower) -> str:
-  return f"{species} | {flower.phenotype} | {flower.hash}"
+def create_label(species: str, hash: str, phenotype: str) -> str:
+  return f"{species} | {phenotype} | {hash}"
 
-def create_img_html(species: str, flower: QuantumFlower) -> str:
+def create_img(species: str, phenotype: str, isSeed: bool) -> str:
+  return f"{"seed" if isSeed else species}_{phenotype}.png"
+
+def create_img_html(species: str, hash: str, phenotype: str, isSeed: bool) -> str:
   html = f"""<span class='picker-row'>
-  <img src='/imgs/{"seed" if flower.isSeed else species}_{flower.phenotype}.png' class='picker-img'>
-  <span class='picker-text'>{create_label(species, flower)}</span>
+  <img src='/imgs/{create_img(species, phenotype, isSeed)}' class='picker-img'>
+  <span class='picker-text'>{create_label(species, phenotype, hash)}</span>
   </span>"""
   return html
 
@@ -125,14 +128,16 @@ def build_policy_plan(species: str, targets: List[str], trajectory: List[Tuple[Q
       state, action, child = trajectory[action_idx]
       
       parent1, parent2 = quantum_pair(action)
-      parent1_info = {"parent1_hash": parent1.hash,
-                      "parent1_phenotype": parent1.phenotype,
-                      "parent1_label": create_label(species, parent1),
-                      "parent1_img_html": create_img_html(species, parent1)}
-      parent2_info = {"parent2_hash": parent2.hash,
-                      "parent2_phenotype": parent2.phenotype,
-                      "parent2_label": create_label(species, parent2),
-                      "parent2_img_html": create_img_html(species, parent2)}
+      parent1_info = {"parent1": parent1.hash,
+                      "parent1_pheno": parent1.phenotype,
+                      "parent1_label": create_label(species, parent1.hash, parent1.phenotype),
+                      "parent1_img_file": create_img(species, parent1.phenotype, parent1.isSeed),
+                      "parent1_img_html": create_img_html(species, parent1.hash, parent1.phenotype, parent1.isSeed)}
+      parent2_info = {"parent2": parent2.hash,
+                      "parent2_pheno": parent2.phenotype,
+                      "parent2_label": create_label(species, parent2.hash, parent2.phenotype),
+                      "parent2_img_file": create_img(species, parent2.phenotype, parent2.isSeed),
+                      "parent2_img_html": create_img_html(species, parent2.hash, parent2.phenotype, parent2.isSeed)}
 
       # Offspring phenotype distribution from this quantum action
       # Use the same distribution logic as qmdp
@@ -145,14 +150,14 @@ def build_policy_plan(species: str, targets: List[str], trajectory: List[Tuple[Q
 
         child_hash = create_flower_hash(phenotype, (parent1.hash, parent2.hash))
 
-        offspring_rows.append({"prob": prob,
-                               "phenotype": phenotype,
-                               "hash": child_hash,
-                               "label": f"{species} | {phenotype} | {child_hash}",
-                               "img_html": f"<img src='/imgs/{species}_{phenotype}.png' class='picker-img'>"})
+        offspring_rows.append({"offspring": child_hash,
+                               "offspring_pheno": phenotype,
+                               "prob": prob
+                               "offspring_label": create_label(species, child_hash, phenotype),
+                               "offspring_img_file": create_img(species, phenotype, False),
+                               "offspring_img_html": create_img_html(species, child_hash, phenotype, False)})
 
-      action_obj = {"action_idx": action_idx,
-                    **parent1_info,
+      action_obj = {**parent1_info,
                     **parent2_info,
                     "offspring": offspring_rows}
 

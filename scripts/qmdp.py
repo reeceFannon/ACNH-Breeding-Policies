@@ -76,7 +76,7 @@ class QuantumFlowerMDP:
     """
     if state in self.action_cache: return self.action_cache[state]
 
-    flowers = sorted(state, key = lambda f: (f.hash))
+    flowers = sorted(state, key = lambda f: f.hash, reverse = True)
     actions = list(combinations_with_replacement(flowers, 2))
     self.action_cache[state] = actions
     return actions
