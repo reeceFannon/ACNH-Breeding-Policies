@@ -67,9 +67,7 @@ def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth:
 
     if heuristic:
       if state - prev_state: # if the set difference exists
-        D1 = [a.to_dense(N, device = gradients.device, dtype = gradients.dtype) for a, _ in actions]
-        D2 = [b.to_dense(N, device = gradients.device, dtype = gradients.dtype) for _, b in actions]
-        scores = torch.tensor([torch.dot(d2, gradients@d1) for d1, d2 in zip(D1, D2)])
+        scores = torch.tensor([action_heuristic_score(action, gradients, N) for action in actions])
         bias = torch.softmax(scores, dim = -1)
       action = random.choices(actions, weights = bias, k = 1)[0]
     else:
