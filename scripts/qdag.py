@@ -116,7 +116,7 @@ def build_policy_plan(species: str, targets: List[str], trajectory: List[Tuple[Q
     - offspring rows by phenotype:
         prob, phenotype, hash, label, img_html
   """
-  if not trajectory: return {"species": species, "waves": []}
+  if not trajectory: return {"species": species, "targets": targets, "waves": []}
 
   geno_dag = build_hash_dag(trajectory, final_state = trajectory[-1][0] | {trajectory[-1][2]})
   action_sched = build_action_schedule(trajectory, geno_dag)
@@ -152,23 +152,23 @@ def build_policy_plan(species: str, targets: List[str], trajectory: List[Tuple[Q
 
         offspring_rows.append({"offspring": child_hash,
                                "offspring_pheno": phenotype,
-                               "prob": prob
+                               "prob": prob,
                                "offspring_label": create_label(species, child_hash, phenotype),
                                "offspring_img_file": create_img(species, phenotype, False),
                                "offspring_img_html": create_img_html(species, child_hash, phenotype, False)})
 
       action_obj = {**parent1_info,
                     **parent2_info,
-                    "offspring": offspring_rows}
+                    "transitions": offspring_rows}
 
       actions_out.append(action_obj)
 
     waves_out.append({"wave": wave_idx,
                       "actions": actions_out})
 
-  return {"species": species, "waves": waves_out}
+  return {"species": species, "targets": targets, "waves": waves_out}
 
-def add_keep_flags(policy: Policy, targets: List[str]) -> dict:
+def add_keep_flags(policy: dict, targets: List[str]) -> dict:
   """
   Mark offspring rows as keep/discard based on whether they are used in future actions
   or match a target phenotype. Remove actions whose offspring are all discard.
@@ -190,14 +190,14 @@ def add_keep_flags(policy: Policy, targets: List[str]) -> dict:
     for i in range(len(flat_actions)):
       future_hashes = set()
       for _, future_action in flat_actions[i + 1:]:
-        future_hashes.add(future_action["parent1_hash"])
-        future_hashes.add(future_action["parent2_hash"])
+        future_hashes.add(future_action["parent1"])
+        future_hashes.add(future_action["parent2"])
       future_parent_hashes_by_idx.append(future_hashes)
 
     # Mark keep flags
     for i, (_, action) in enumerate(flat_actions):
       future_hashes = future_parent_hashes_by_idx[i]
-      for row in action["offspring"]: row["keep"] = (row["hash"] in future_hashes or row["phenotype"] in targets)
+      for row in action["transitions"]: row["keep"] = (row["offspring"] in future_hashes or row["offspring_pheno"] in targets)
 
     # Remove actions with all-trash offspring
     for wave in policy["waves"]:
@@ -218,9 +218,6 @@ def add_keep_flags(policy: Policy, targets: List[str]) -> dict:
   for new_idx, wave in enumerate(policy["waves"]): wave["wave"] = new_idx
 
   return policy
-
-from dataclasses import dataclass, field
-from typing import List, Tuple
 
 @dataclass
 class QuantumPolicy:
