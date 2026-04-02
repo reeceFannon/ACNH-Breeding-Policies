@@ -203,7 +203,7 @@ def add_keep_flags(policy: dict, targets: List[str]) -> dict:
     for wave in policy["waves"]:
       new_actions = []
       for action in wave["actions"]:
-        if any(row.get("keep", False) for row in action["offspring"]): new_actions.append(action)
+        if any(row.get("keep", False) for row in action["transitions"]): new_actions.append(action)
         else: changed = True
       wave["actions"] = new_actions
 
