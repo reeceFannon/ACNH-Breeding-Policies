@@ -243,7 +243,7 @@ class QuantumPolicy:
     return policy
 
   def add_keep_flags(self):
-    policy = {"species": self.species, "waves": self.waves}
+    policy = {"species": self.species, "targets": self.targets, "waves": self.waves}
     policy = add_keep_flags(policy, targets = self.targets)
     self.waves = policy["waves"]
     return policy
