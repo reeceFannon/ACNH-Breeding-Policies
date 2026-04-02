@@ -1,6 +1,8 @@
 import math
 import random
 import torch
+from itertools import combinations_with_replacement
+from tqdm import tqdm
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple, Sequence, FrozenSet
 from transitions import FlowerTransitions, TransitionTensorBuilder, TransitionTensor, posterior_given_phenotype, canonical_pair
@@ -51,9 +53,9 @@ def action_heuristic_score(action: QuantumAction, gradients: torch.FloatTensor, 
 
 def get_new_actions(old_flowers: QuantumState, new_flowers: QuantumState) -> List[QuantumAction]:
   if not old_flowers: return []
-  old_x_new = [quantum_pair(old, new) for old in old_flowers for new in new_flowers]
-  new_x_new = [quantum_pair(a, b) for a, b in combinations_with_replacement(new_flowers, 2)]
-  return old_new + new_new
+  old_x_new = [quantum_pair((old, new)) for old in old_flowers for new in new_flowers]
+  new_x_new = [quantum_pair(pair) for pair in combinations_with_replacement(new_flowers, 2)]
+  return old_x_new + new_x_new
 
 def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth: int = 20, heuristic: bool = False, transition_tensor: TransitionTensor = None, gradients: torch.FloatTensor = None) -> float:
   """
@@ -64,25 +66,16 @@ def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth:
   prev_state = frozenset()
   state = start_state
   actions = qmdp.available_actions(state)
-  scores = [action_heuristic_score(action, gradients, N) for action in actions]
-  N = len(transition_tensor.idx_to_genotype)
     
   for t in range(max_depth):
     if qmdp.is_terminal(state): return float(-t) # already reached target
     if not actions: return float(-max_depth) # dead-end; can't continue
 
-    if heuristic:
-      new_flowers = state - prev_state
-      if new_flowers: # if the set difference exists
-        new_actions = get_new_actions(prev_state, new_flowers)
-        new_scores = [action_heuristic_score(action, gradients, N) for action in new_actions]
-        actions.extend(new_actions)
-        scores.extend(new_scores)
-        score_tensor = torch.tensor(scores, dtype = gradients.dtype, device = gradients.device)
-        bias = torch.softmax(score_tensor, dim = -1)
-      action = random.choices(actions, weights = bias, k = 1)[0]
-    else:
-      action = random.choice(actions)
+    new_flowers = state - prev_state
+    if new_flowers: # if the set difference exists
+      new_actions = get_new_actions(prev_state, new_flowers)
+      actions.extend(new_actions)
+    action = random.choice(actions)
 
     prev_state = state
     state = sample_next_state(state, action, transition_tensor, latent_genotype_cache)
@@ -136,7 +129,7 @@ class MCTSNode:
         best = child
     return best
 
-def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), heuristic: bool = False, cloning: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, c_pw: float = 1.0, a_pw: float = 0.5) -> MCTSNode:
+def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations: int = 1000, max_rollout_depth: int = 20, c: float = math.sqrt(2.0), heuristic: bool = False, cloning: bool = False, normalize: bool = False, transition_tensor: TransitionTensor = None, gradients: Dict = None, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, c_pw: float = 1.0, a_pw: float = 0.5) -> MCTSNode:
   """
   Run MCTS from the root_state and return the root node
   with its tree of children filled in.
@@ -147,12 +140,13 @@ def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations:
   N = len(transition_tensor.idx_to_genotype)
   if heuristic:
     dL = gradients["grad_logits"]
-    mu = dL.mean(dim = 1, keepdim = True)
-    sigma = dL.std(dim = 1, keepdim = True)
-    dL_Z = (dL - mu)/sigma
-    dL_max = torch.maximum(dL_Z, dL_Z.T)
+    if normalize:
+      mu = dL.mean(dim = 1, keepdim = True)
+      sigma = dL.std(dim = 1, keepdim = True)
+      dL = (dL - mu)/sigma
+    dL_max = torch.maximum(dL, dL.T)
 
-  for _ in range(n_simulations):
+  for _ in tqdm(range(n_simulations), desc = "Searching Tree"):
     node = root
 
     # 1. SELECTION: descend tree using UCT
@@ -185,7 +179,7 @@ def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations:
 
   return root
 
-def full_episode(species: str, targets: List[str], root_state: List[str], root_counts: List[float], root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, cloning: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, c_pw: float = 1.0, a_pw: float = 0.5, recalc_heuristic_every: int = 1) -> Dict[str, object]:
+def full_episode(species: str, targets: List[str], root_state: List[str], root_counts: List[float], root_n_simulations: int = 1000, max_episode_steps: int = 1000, root_max_rollout_depth: int = 20, c: float = math.sqrt(2.0), min_n_simulations: int = 100, max_simulations_scale_factor: float = 0.0, min_depth_floor: int = 10, seed: int | None = None, heuristic: bool = False, cloning: bool = False, normalize: bool = False, num_waves: int = 4, init_logits_scale: float = 0.01, optim_steps: int = 1000, lr: float = 1e-2, log_steps: int = 100, eps_present: float = 0.0, c_pw: float = 1.0, a_pw: float = 0.5, recalc_heuristic_every: int = 1) -> Dict[str, object]:
   total_steps = 0
   trajectory: List[Tuple[QuantumState, QuantumAction]] = []
   current_max_rollout_depth = root_max_rollout_depth
@@ -216,7 +210,7 @@ def full_episode(species: str, targets: List[str], root_state: List[str], root_c
 
     # --- MCTS from current state ---
     qmdp = QuantumFlowerMDP(species = species, transition_tensor = transition_tensor, targets = targets)
-    root = mcts_search(qmdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, cloning, transition_tensor, gradients, init_logits_scale, optim_steps, lr, log_steps, eps_present, c_pw, a_pw)
+    root = mcts_search(qmdp, state, current_n_simulations, current_max_rollout_depth, c, heuristic, cloning, normalize, transition_tensor, gradients, init_logits_scale, optim_steps, lr, log_steps, eps_present, c_pw, a_pw)
     root_stats = extract_root_action_stats(root)
     best_action = best_root_action_from_stats(root_stats)
 
