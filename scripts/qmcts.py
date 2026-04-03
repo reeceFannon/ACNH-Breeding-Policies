@@ -32,7 +32,6 @@ def sample_child(qmdp: QuantumFlowerMDP, action: QuantumAction, transition_tenso
 
 def sample_next_state(qmdp: QuantumFlowerMDP, state: QuantumState, action: QuantumAction, transition_tensor: TransitionTensor) -> QuantumState:
   child, child_idx = sample_child(qmdp, action, transition_tensor)
-  cache[child] = child_idx
   next_state = frozenset(set(state) | {child})
   return next_state
 
