@@ -17,19 +17,10 @@ def initialize_start(genotypes: List[str], transition_tensor: TransitionTensor) 
   flowers = [QuantumFlower(hashes[i], phenotypes[i], True, (idxs[i],), (1.0,), ("0"*16, "0"*16)) for i in range(p)]
   return frozenset(set(flowers))
 
-def resolve_latent_genotype(flower: QuantumFlower, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> int:
-  if flower not in cache:
-    dist = flower.to_dense(len(transition_tensor.idx_to_genotype), device = transition_tensor.T.device, dtype = transition_tensor.T.dtype)
-    cache[flower] = int(torch.multinomial(dist, 1).item())
-  return cache[flower]
-
-def sample_child(action: QuantumAction, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> tuple[QuantumFlower, int]:
+def sample_child(qmdp: QuantumFlowerMDP, action: QuantumAction, transition_tensor: TransitionTensor) -> tuple[QuantumFlower, int]:
   parent1, parent2 = quantum_pair(action)
-  i = resolve_latent_genotype(parent1, transition_tensor, cache)
-  j = resolve_latent_genotype(parent2, transition_tensor, cache)
-
-  T = transition_tensor.T
-  offspring_dist = T[i, j, :]
+  
+  offspring_dist = qmdp.breed_distribution(parent1, parent2)
   child_idx = int(torch.multinomial(offspring_dist, 1).item())
   child_phenotype = transition_tensor.idx_to_phenotype[child_idx]
   
@@ -39,8 +30,8 @@ def sample_child(action: QuantumAction, transition_tensor: TransitionTensor, cac
 
   return child, child_idx
 
-def sample_next_state(state: QuantumState, action: QuantumAction, transition_tensor: TransitionTensor, cache: Dict[QuantumFlower, int]) -> QuantumState:
-  child, child_idx = sample_child(action, transition_tensor, cache)
+def sample_next_state(qmdp: QuantumFlowerMDP, state: QuantumState, action: QuantumAction, transition_tensor: TransitionTensor) -> QuantumState:
+  child, child_idx = sample_child(qmdp, action, transition_tensor)
   cache[child] = child_idx
   next_state = frozenset(set(state) | {child})
   return next_state
@@ -62,7 +53,6 @@ def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth:
   Random policy rollout from start_state.
   Returns reward = -steps to terminal (more negative if slower).
   """
-  latent_genotype_cache: Dict[QuantumFlower, int] = {}
   prev_state = frozenset()
   state = start_state
   actions = qmdp.available_actions(state)
@@ -78,7 +68,7 @@ def random_rollout(qmdp: QuantumFlowerMDP, start_state: QuantumState, max_depth:
     action = random.choice(actions)
 
     prev_state = state
-    state = sample_next_state(state, action, transition_tensor, latent_genotype_cache)
+    state = sample_next_state(qmdp, state, action, transition_tensor)
 
   return float(-max_depth) # didn't reach terminal within horizon
 
