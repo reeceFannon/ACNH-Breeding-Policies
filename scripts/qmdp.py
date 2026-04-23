@@ -20,9 +20,9 @@ def create_flower_hash(phenotype: str, parents: Optional[Tuple[str, str]], *, n_
 
 @dataclass(frozen = True)
 class QuantumFlower:
-  hash: str
+  hash: str = field(compare = False)
   phenotype: str
-  isSeed: bool
+  isSeed: bool = field(compare = False)
   genotype_idxs: Tuple[int, ...]
   genotype_probs: Tuple[float, ...]
   parents: Optional[Tuple[str, str]] = None

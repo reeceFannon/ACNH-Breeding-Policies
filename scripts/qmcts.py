@@ -98,7 +98,7 @@ class MCTSNode:
   def update_action_score_cache(self, gradients: Optional[torch.Tensor], N: int) -> None:
     if self.action_score_cache is not None and self.untried_actions is not None: return
     self.action_score_cache = {action: action_heuristic_score(action, gradients, N) for action in self.untried_actions}
-    self.untried_actions = sorted(self.untried_actions, key = lambda a: self.action_score_cache[a], reverse = True)
+    self.untried_actions = sorted(self.untried_actions, key = lambda a: self.action_score_cache[a])
 
   def best_child(self, c: float = math.sqrt(2.0)) -> "MCTSNode":
     """
@@ -147,8 +147,7 @@ def mcts_search(qmdp: QuantumFlowerMDP, root_state: QuantumState, n_simulations:
     # 2. EXPANSION: expand one untried action (if any and not terminal)
     if not qmdp.is_terminal(node.state) and node.can_expand(c_pw, a_pw):
       node.update_action_score_cache(dL_max, N)
-      action = node.untried_actions[0]
-      node.untried_actions.remove(action)
+      action = node.untried_actions.pop()
 
       next_state, _ = qmdp.sample_next_state(node.state, action)
 
